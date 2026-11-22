@@ -12,12 +12,12 @@
 
 [![HACS](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/default)
 [![Documentation](https://img.shields.io/badge/docs-stevene.enuff.com-blue.svg)](https://stevene.enuff.com/vidaa)
-[![GitHub Release](https://img.shields.io/github/v/release/stevene1919/hisense_vidaa)](https://github.com/stevene1919/hisense_vidaa/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/GLG9/unified-vidaa)](https://github.com/GLG9/unified-vidaa/releases)
 [![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=flat&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
-[![Validate with HACS](https://github.com/stevene1919/hisense_vidaa/actions/workflows/validate.yml/badge.svg)](https://github.com/stevene1919/hisense_vidaa/actions/workflows/validate.yml)
-[![Lint & Verify](https://github.com/stevene1919/hisense_vidaa/actions/workflows/lint.yml/badge.svg)](https://github.com/stevene1919/hisense_vidaa/actions/workflows/lint.yml)
+[![Validate with HACS](https://github.com/GLG9/unified-vidaa/actions/workflows/validate.yml/badge.svg)](https://github.com/GLG9/unified-vidaa/actions/workflows/validate.yml)
+[![Lint & Verify](https://github.com/GLG9/unified-vidaa/actions/workflows/lint.yml/badge.svg)](https://github.com/GLG9/unified-vidaa/actions/workflows/lint.yml)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=stevene1919&repository=hisense_vidaa&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=GLG9&repository=unified-vidaa&category=integration)
 
 A native Home Assistant integration for smart TVs and projectors running **VIDAA OS** (Hisense, Toshiba, Loewe, Philips, Sharp, JVC, TOPTRO, and partner brands).
 
@@ -36,7 +36,7 @@ Setting up your TV takes less than 3 minutes across 3 simple steps:
 ### 1️⃣ Install via Marketplace (HACS)
 Click the one-click button below (or search **VIDAA Smart TV** in Marketplace (HACS) → Integrations → Download):
 
-[![Open Marketplace (HACS)](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=stevene1919&repository=hisense_vidaa&category=integration)
+[![Open Marketplace (HACS)](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=GLG9&repository=unified-vidaa&category=integration)
 
 ### 2️⃣ Place the Key File (`client_mobile_android.p12` or `El.p12`)
 VIDAA TVs enforce mutual TLS on port 36669. Drop the universal **`client_mobile_android.p12`** (or `El.p12`) file into your Home Assistant **`/config/ssl/`** directory.

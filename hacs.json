@@ -1,7 +1,5 @@
 {
   "name": "VIDAA Smart TV",
   "render_readme": true,
-  "homeassistant": "2025.1.0",
-  "zip_release": true,
-  "filename": "vidaa.zip"
+  "homeassistant": "2025.1.0"
 }
