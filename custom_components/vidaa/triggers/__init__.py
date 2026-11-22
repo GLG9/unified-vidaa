@@ -1,0 +1,1 @@
+"""VIDAA Smart TV triggers."""

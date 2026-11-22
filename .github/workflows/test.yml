@@ -1,0 +1,68 @@
+name: Unit Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "custom_components/vidaa/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - ".github/workflows/test.yml"
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: Pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+          version: "latest"
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --python ${{ matrix.python-version }}
+
+      - name: Run Pytest Suite with Coverage
+        run: |
+          uv run --python ${{ matrix.python-version }} pytest -v --cov=custom_components/vidaa --cov-report=xml --cov-report=term-missing
+
+      - name: Generate Coverage Summary in GitHub Actions
+        if: matrix.python-version == '3.13'
+        run: |
+          echo "## 📊 Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          uv run --python ${{ matrix.python-version }} coverage report --format=markdown >> $GITHUB_STEP_SUMMARY
+
+      - name: Save PR metadata
+        if: matrix.python-version == '3.13' && github.event_name == 'pull_request'
+        run: echo "${{ github.event.number }}" > pr_number.txt
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.13' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            pr_number.txt
+          if-no-files-found: ignore

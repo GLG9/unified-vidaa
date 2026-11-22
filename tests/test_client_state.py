@@ -1,0 +1,503 @@
+"""Unit tests for VidaaClient state processing and callbacks."""
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from custom_components.vidaa.client import VidaaClient
+from custom_components.vidaa.tv.aliases import ALL_KEY_AND_APP_ALIASES as KEY_ALIASES
+
+
+def test_key_aliases():
+    """Verify common friendly remote key names map correctly to VIDAA hardware codes."""
+    assert KEY_ALIASES["power"] == "KEY_POWER"
+    assert KEY_ALIASES["volume_up"] == "KEY_VOLUMEUP"
+    assert KEY_ALIASES["volume_down"] == "KEY_VOLUMEDOWN"
+    assert KEY_ALIASES["mute"] == "KEY_MUTE"
+    assert KEY_ALIASES["home"] == "KEY_HOME"
+    assert KEY_ALIASES["menu"] == "KEY_MENU"
+    assert KEY_ALIASES["back"] == "KEY_RETURNS"
+    assert KEY_ALIASES["ok"] == "KEY_OK"
+    assert KEY_ALIASES["voice_up"] == "KEY_VOICEUP"
+    assert KEY_ALIASES["dot"] == "KEY_CHANNELDOT"
+    assert KEY_ALIASES["mouse"] == "KEY_LEFTMOUSEKEYS"
+    assert KEY_ALIASES["mouse_click"] == "KEY_LEFTMOUSEKEYS"
+    assert KEY_ALIASES["mouse_down"] == "KEY_UDDLEFTMOUSEKEYS"
+    assert KEY_ALIASES["mouse_up"] == "KEY_UDULEFTMOUSEKEYS"
+    assert KEY_ALIASES["zoom_in"] == "KEY_ZOOMIN"
+    assert KEY_ALIASES["zoom_out"] == "KEY_ZOOMOUT"
+    assert KEY_ALIASES["audio_only"] == "KEY_AUDIO"
+    assert KEY_ALIASES["screen_off"] == "KEY_AUDIO"
+
+
+def test_state_dispatch_callbacks():
+    """Test state update messages trigger registered callbacks with parsed data."""
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.update_topic_paths()
+
+    received_state = []
+    received_volume = []
+    received_apps = []
+    received_sources = []
+
+    client.register_state_callback(lambda data: received_state.append(data))
+    client.register_volume_callback(lambda data: received_volume.append(data))
+    client.register_applist_callback(lambda data: received_apps.append(data))
+    client.register_sourcelist_callback(lambda data: received_sources.append(data))
+
+    mock_msg = MagicMock()
+
+    # 1. State update message on broadcast topic
+    mock_msg.topic = f"{client.topics.broadcast}ui_service/state"
+    mock_msg.payload = b'{"statetype": "fake_sleep_0"}'
+    client._on_message(None, None, mock_msg)
+    assert len(received_state) == 1
+    assert received_state[0]["statetype"] == "fake_sleep_0"
+
+    # 2. Volume update message on broadcast topic
+    mock_msg.topic = f"{client.topics.broadcast}platform_service/actions/volumechange"
+    mock_msg.payload = b'{"volume_value": 25, "volume_type": 0}'
+    client._on_message(None, None, mock_msg)
+    assert len(received_volume) == 1
+    assert received_volume[0]["volume_value"] == 25
+
+    # 3. App list update message
+    mock_msg.topic = f"{client.topics.mobile}ui_service/data/applist"
+    mock_msg.payload = b'[{"appId": "1", "appName": "Netflix", "appUrl": "netflix://"}, {"appId": "2", "appName": "YouTube", "appUrl": "youtube://"}]'
+    client._on_message(None, None, mock_msg)
+    assert len(received_apps) == 1
+    assert len(received_apps[0]) == 2
+    assert received_apps[0][0]["appName"] == "Netflix"
+
+    # 4. Source list update message
+    mock_msg.topic = f"{client.topics.mobile}ui_service/data/sourcelist"
+    mock_msg.payload = b'[{"sourceId": "1", "sourceName": "HDMI 1"}, {"sourceId": "2", "sourceName": "HDMI 2 (eARC)"}]'
+    client._on_message(None, None, mock_msg)
+    assert len(received_sources) == 1
+    assert len(received_sources[0]) == 2
+    assert received_sources[0][0]["sourceName"] == "HDMI 1"
+
+
+def test_volume_alternate_topic_dispatch():
+    """Test volume update messages on alternate VIDAA firmware topics."""
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.update_topic_paths()
+
+    received_volume = []
+    client.register_volume_callback(lambda data: received_volume.append(data))
+
+    mock_msg = MagicMock()
+    mock_msg.topic = f"{client.topics.broadcast}ui_service/volume"
+    mock_msg.payload = b'{"volume_value": 42, "volume_type": 0}'
+    client._on_message(None, None, mock_msg)
+
+    assert len(received_volume) == 1
+    assert received_volume[0]["volume_value"] == 42
+
+
+def test_wake_on_lan_subnet_broadcast():
+    """Test Wake-on-LAN sends magic packets to both subnet directed broadcast and 255.255.255.255."""
+    from unittest.mock import MagicMock, patch
+
+    sent_targets = []
+
+    mock_sock = MagicMock()
+    mock_sock.__enter__.return_value = mock_sock
+
+    def mock_sendto(data, addr):
+        sent_targets.append(addr[0])
+        return len(data)
+
+    mock_sock.sendto.side_effect = mock_sendto
+
+    with patch("socket.socket", return_value=mock_sock):
+        result = VidaaClient.send_wake_on_lan(
+            mac="e8:51:77:aa:bb:cc",
+            ip="192.168.1.100",
+        )
+        assert result is True
+        assert "255.255.255.255" in sent_targets
+        assert "192.168.1.255" in sent_targets
+
+
+def test_callback_unregistration_and_safety():
+    """Test callback registration, unregistration, and error isolation."""
+    client = VidaaClient(ip="192.168.1.100")
+    called = []
+
+    def faulty_cb(data):
+        raise RuntimeError("Isolated error")
+
+    def good_cb(data):
+        called.append(data)
+
+    client.register_state_callback(faulty_cb)
+    client.register_state_callback(good_cb)
+
+    # Dispatch should not raise and should successfully call good_cb
+    client._dispatch_state_update({"test": "ok"})
+    assert len(called) == 1
+
+    # Unregister
+    client.unregister_state_callback(good_cb)
+    client._dispatch_state_update({"test": "again"})
+    assert len(called) == 1
+
+
+def test_connected_and_disconnected_callbacks():
+    """Test connected and disconnected callback lifecycle."""
+    client = VidaaClient(ip="192.168.1.100")
+    events = []
+
+    def on_conn():
+        events.append("connected")
+
+    def on_disconn():
+        events.append("disconnected")
+
+    client.register_connected_callback(on_conn)
+    client.register_disconnected_callback(on_disconn)
+
+    client._dispatch_connected()
+    assert events == ["connected"]
+
+    client._dispatch_disconnected()
+    assert events == ["connected", "disconnected"]
+
+    client.unregister_connected_callback(on_conn)
+    client.unregister_disconnected_callback(on_disconn)
+    client._dispatch_connected()
+    client._dispatch_disconnected()
+    assert events == ["connected", "disconnected"]
+
+
+def test_source_cycling_and_command_helpers():
+    """Test cycle_source and send_command with input, source, and app prefixes."""
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.change_source = MagicMock()
+    client.send_key = MagicMock()
+    client.launch_app = MagicMock()
+
+    client.sources = [
+        {"sourceid": "0", "sourcename": "TV"},
+        {"sourceid": "3", "sourcename": "HDMI1"},
+        {"sourceid": "4", "sourcename": "HDMI2"},
+    ]
+    client.apps = [
+        {"appId": "123", "name": "Stan", "url": "stan://"},
+    ]
+    client.current_source = "TV"
+
+    # 1. Input cycling from TV -> HDMI1
+    assert client.send_command("input") is True
+    client.change_source.assert_called_with("3", "HDMI1")
+
+    # 2. Cycling from HDMI1 -> HDMI2 with KEY_INPUT
+    client.current_source = "HDMI1"
+    assert client.send_command("KEY_INPUT") is True
+    client.change_source.assert_called_with("4", "HDMI2")
+
+    # 3. Cycling from HDMI2 -> TV (wraparound)
+    client.current_source = "HDMI2"
+    assert client.send_command("source") is True
+    client.change_source.assert_called_with("0", "TV")
+
+    # 4. Direct source targeting
+    assert client.send_command("source:HDMI2") is True
+    client.change_source.assert_called_with("4", "HDMI2")
+
+    # 5. App targeting via app: prefix (case-insensitive and normalized)
+    assert client.send_command("app:stan") is True
+    client.launch_app.assert_called_with("123", "Stan", "stan://")
+
+    # 6. Built-in app shortcuts
+    assert client.send_command("app:netflix") is True
+    client.send_key.assert_called_with("KEY_NETFLIX")
+
+    # 7. Virtual keyboard / text input prefix commands
+    client.send_text_input = MagicMock()
+    assert client.send_command("text:The Matrix") is True
+    client.send_text_input.assert_called_with("The Matrix", action="insert")
+
+    assert client.send_command("type:Blade Runner") is True
+    client.send_text_input.assert_called_with("Blade Runner", action="insert")
+
+    assert client.send_command("text:replace:New Query") is True
+    client.send_text_input.assert_called_with("New Query", action="replace")
+
+    assert client.send_command("text:clear") is True
+    client.send_text_input.assert_called_with("", action="clear")
+
+    assert client.send_command("clear_text") is True
+    client.send_text_input.assert_called_with("", action="clear")
+
+
+def test_volume_and_mute_state_parsing():
+    """Test volume and mute parsing properly distinguishes ARC volume from mute packets."""
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.update_topic_paths()
+
+    mock_msg = MagicMock()
+    mock_msg.topic = f"{client.topics.broadcast}platform_service/actions/volumechange"
+
+    # ARC / eARC volume broadcast (volume_type = 1): updates volume, must not set muted=True
+    mock_msg.payload = b'{"volume_value": 35, "volume_type": 1}'
+    client._on_message(None, None, mock_msg)
+    assert client.volume == 35
+    assert client.muted is False
+
+    # Mute broadcast (volume_type = 2, volume_value = 1): sets muted=True
+    mock_msg.payload = b'{"volume_value": 1, "volume_type": 2}'
+    client._on_message(None, None, mock_msg)
+    assert client.muted is True
+
+    # Unmute broadcast (volume_type = 2, volume_value = 0): sets muted=False
+    mock_msg.payload = b'{"volume_value": 0, "volume_type": 2}'
+    client._on_message(None, None, mock_msg)
+    assert client.muted is False
+
+
+def test_livetv_state_parsing_and_cycling():
+    """Test Live TV broadcast parsing without sourcename and cycling over hardware sources."""
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.update_topic_paths()
+    client.change_source = MagicMock()
+
+    client.sources = [
+        {"sourceid": "TV", "sourcename": "TV", "displayname": "TV"},
+        {"sourceid": "284", "sourcename": "VIDAA tv", "displayname": "VIDAA tv"},
+        {"sourceid": "HDMI1", "sourcename": "HDMI1", "displayname": "HDMI1"},
+        {"sourceid": "HDMI2", "sourcename": "HDMI2", "displayname": "HDMI2"},
+        {"sourceid": "HDMI3", "sourcename": "HDMI3", "displayname": "HDMI3"},
+        {"sourceid": "AVS", "sourcename": "AV", "displayname": "AV"},
+    ]
+
+    mock_msg = MagicMock()
+    mock_msg.topic = f"{client.topics.broadcast}ui_service/state"
+    mock_msg.payload = b'{"statetype":"livetv","list_param":"400001","channel_num":"5000","channel_name":"Mythbusters","sourceid":"TV"}'
+    client._on_message(None, None, mock_msg)
+
+    assert client.current_source == "TV"
+    assert client.current_source_id == "TV"
+    assert client.current_channel == "Mythbusters"
+
+    # Cycling from TV should skip virtual app ID 284 (VIDAA tv) and advance to HDMI1
+    assert client.send_command("input") is True
+    client.change_source.assert_called_with("HDMI1", "HDMI1")
+
+    # Cycling from AV should wrap around to TV
+    client.current_source = "AV"
+    assert client.send_command("input") is True
+    client.change_source.assert_called_with("TV", "TV")
+
+
+def test_apply_state_update_fake_sleep_vocabulary():
+    """F2-leg3/F3-leg4: fake_sleep_1 means waking (ON); fake_sleep_0 and "off"-ish mean off.
+
+    item 10 acceptance: (a) fake_sleep_1 => ON, (b) fake_sleep_0 => off, and (c) a
+    statetype containing "off" is off (the agreed behaviour across state + entities).
+    """
+    from custom_components.vidaa.tv.state import apply_state_update
+
+    client = VidaaClient(ip="192.168.1.100", client_id="cid")
+
+    # (b) fake_sleep_0 => off
+    apply_state_update(client, {"statetype": "fake_sleep_0"})
+    assert client.state == "off"
+    assert client.is_on is False
+
+    # (a) fake_sleep_1 => ON (TV waking up; not a "sleep depth")
+    apply_state_update(client, {"statetype": "fake_sleep_1"})
+    assert client.state == "on"
+    assert client.is_on is True
+
+    # (c) a statetype containing "off" is off
+    apply_state_update(client, {"statetype": "poweroff"})
+    assert client.state == "off"
+    assert client.is_on is False
+
+    # An ordinary active statetype still reports on
+    apply_state_update(client, {"statetype": "livetv"})
+    assert client.state == "on"
+
+    # (d) remote_launcher and launcher update current_app (Issue #58)
+    apply_state_update(client, {"statetype": "app", "appname": "Netflix", "appid": "1"})
+    assert client.current_app == "Netflix"
+    assert client.current_app_id == "1"
+
+    apply_state_update(client, {"statetype": "remote_launcher"})
+    assert client.state == "on"
+    assert client.current_app == "Home Launcher"
+    assert client.current_app_id is None
+
+
+def test_device_info_telemetry_and_entity_binding():
+    """Test getdeviceinfo and gettvinfo telemetry update client state and VidaaEntity device_info."""
+    from custom_components.vidaa.entity import VidaaEntity
+
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.update_topic_paths()
+
+    # Dispatch getdeviceinfo telemetry
+    mock_msg = MagicMock()
+    mock_msg.topic = f"{client.topics.mobile}platform_service/data/getdeviceinfo"
+    mock_msg.payload = b'{"model_name": "58A53FXVT", "tv_version": "V0000.06.30T.N0921"}'
+    client._on_message(None, None, mock_msg)
+
+    assert client.model_name == "58A53FXVT"
+    assert client.firmware_version == "V0000.06.30T.N0921"
+
+    # Dispatch gettvinfo telemetry
+    mock_msg = MagicMock()
+    mock_msg.topic = f"{client.topics.mobile}platform_service/data/gettvinfo"
+    mock_msg.payload = b'{"brand": "his", "uVersion": "U6.1.0"}'
+    client._on_message(None, None, mock_msg)
+
+    assert client.manufacturer == "Hisense"
+    assert client.firmware_version == "U6.1.0"
+
+    # Test entity device_info property uses live telemetry over static entry fallback
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry_id"
+    mock_entry.title = "Living Room TV"
+    mock_entry.data = {
+        "mac_address": "e8:51:77:aa:bb:cc",
+        "model": "VIDAA TV",
+        "manufacturer": "SmartTV",
+        "sw_version": "1.0",
+    }
+    mock_entry.options = {}
+
+    entity = VidaaEntity(client, mock_entry)
+    dev_info = entity.device_info
+
+    assert dev_info["manufacturer"] == "Hisense"
+    assert dev_info["model"] == "58A53FXVT"
+    assert dev_info["sw_version"] == "U6.1.0"
+
+
+def test_entity_device_info_brand_fallback():
+    """Test VidaaEntity falls back to BRAND_MAP based on brand code when manufacturer is unset."""
+    from custom_components.vidaa.entity import VidaaEntity
+
+    client = VidaaClient(ip="192.168.1.125", brand="loe")
+    mock_entry = MagicMock()
+    mock_entry.entry_id = "test_entry_loe"
+    mock_entry.title = "Loewe bild i"
+    mock_entry.data = {
+        "mac_address": "00:11:22:33:44:55",
+        "brand": "loe",
+    }
+    mock_entry.options = {}
+
+    entity = VidaaEntity(client, mock_entry)
+    dev_info = entity.device_info
+    assert dev_info["manufacturer"] == "Loewe"
+
+
+def test_generic_manufacturer_filtered_in_device_info_update():
+    """Generic manufacturer names are not applied to client.manufacturer."""
+    from custom_components.vidaa.tv.state import apply_device_info_update
+
+    client = MagicMock()
+    client.manufacturer = "Hisense"
+    client.model_name = "OriginalModel"
+
+    # Broadcast with generic manufacturer "SmartTV"
+    apply_device_info_update(client, {"manufacturer": "SmartTV", "model": "65U7G"})
+
+    assert client.manufacturer == "Hisense"  # Unchanged!
+    assert client.model_name == "65U7G"
+
+
+def test_device_info_update_extracts_dual_mac():
+    """Test apply_device_info_update extracts eth0 and wlan0 MAC addresses."""
+    from custom_components.vidaa.tv.state import apply_device_info_update
+
+    client = MagicMock()
+    client.mac_ethernet = None
+    client.mac_wifi = None
+
+    apply_device_info_update(
+        client,
+        {
+            "eth0": "e43bc9aabbcc",
+            "wlan0": "e85177aabbcc",
+            "model_name": "58A53FXVT",
+        },
+    )
+
+    assert client.mac_ethernet == "e4:3b:c9:aa:bb:cc"
+    assert client.mac_wifi == "e8:51:77:aa:bb:cc"
+
+
+@pytest.mark.anyio
+async def test_async_send_command_text_prefixes():
+    """Test async_send_command parses and dispatches text and clear commands."""
+    from custom_components.vidaa.tv.actions_input import async_send_command
+
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.async_send_text_input = AsyncMock()
+
+    assert await async_send_command(client, "text:Inception") is True
+    client.async_send_text_input.assert_called_with("Inception", action="insert")
+
+    assert await async_send_command(client, "type:Interstellar") is True
+    client.async_send_text_input.assert_called_with("Interstellar", action="insert")
+
+    assert await async_send_command(client, "text:replace:Dune") is True
+    client.async_send_text_input.assert_called_with("Dune", action="replace")
+
+    assert await async_send_command(client, "text:clear") is True
+    client.async_send_text_input.assert_called_with("", action="clear")
+
+    assert await async_send_command(client, "clear_text") is True
+    client.async_send_text_input.assert_called_with("", action="clear")
+
+
+def test_sourcelist_with_active_signal_does_not_wake_standby_tv():
+    """Test sourcelist broadcast with active HDMI signal (is_signal=1) does not wake client in standby (Issue #61)."""
+    client = VidaaClient(ip="192.168.1.100", client_id="test_client")
+    client.update_topic_paths()
+
+    # 1. TV reports standby via fake_sleep_0
+    mock_msg = MagicMock()
+    mock_msg.topic = f"{client.topics.broadcast}ui_service/state"
+    mock_msg.payload = b'{"statetype": "fake_sleep_0"}'
+    client._on_message(None, None, mock_msg)
+
+    assert client.state == "off"
+    assert client.is_on is False
+
+    # 2. TV broadcasts sourcelist where an external device (e.g. Apple TV on HDMI1) has active signal
+    mock_msg.topic = f"{client.topics.mobile}ui_service/data/sourcelist"
+    mock_msg.payload = (
+        b'[{"sourceid": "284", "sourcename": "VIDAA tv", "is_signal": "0", "has_signal": "1"}, '
+        b'{"sourceid": "HDMI1", "sourcename": "HDMI1", "is_signal": "1", "has_signal": "0"}]'
+    )
+    client._on_message(None, None, mock_msg)
+
+    # Client must remain in standby/off!
+    assert client.state == "off"
+    assert client.is_on is False
+    assert client.current_source == "HDMI1"
+
+    # 3. gettvinfo confirms fake_sleep_state == 0 (standby)
+    mock_msg.topic = f"{client.topics.mobile}platform_service/data/gettvinfo"
+    mock_msg.payload = b'{"fake_sleep": 1, "fake_sleep_state": 0, "uVersion": "V0000.09.50P"}'
+    client._on_message(None, None, mock_msg)
+    assert client.state == "off"
+    assert client.is_on is False
+
+    # 4. When TV is actually awake (fake_sleep_state == 1 in gettvinfo), even if ui_service/state was missed/stale (#53)
+    state_events = []
+    client.register_state_callback(lambda d: state_events.append(d))
+    mock_msg.topic = f"{client.topics.mobile}platform_service/data/gettvinfo"
+    mock_msg.payload = b'{"fake_sleep": 1, "fake_sleep_state": 1, "uVersion": "V0000.09.50P"}'
+    client._on_message(None, None, mock_msg)
+
+    assert client.state == "on"
+    assert client.is_on is True
+    assert len(state_events) == 1
+    assert state_events[0]["statetype"] == "fake_sleep_1"
+    assert state_events[0]["sourcename"] == "HDMI1"

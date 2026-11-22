@@ -1,0 +1,136 @@
+name: "🐛 Bug Report"
+description: "Report an issue, defect, or unexpected behavior with VIDAA Smart TV"
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!CAUTION]
+        > **Out-of-Scope Notice:** Issues regarding **HACS / marketplace installation** or requests for **SSL certificate extraction / private keys** are out of scope for this repository and will be closed.
+
+        ### 🧪 Diagnostic Testing
+        Before opening a bug report, running the built-in diagnostic tool against your TV's IP address can often pinpoint the exact issue (firmware compatibility, certificate error, or network block).
+
+        > [!NOTE]
+        > `test_client.py` is a standalone developer utility located in [`scripts/test_client.py`](https://github.com/stevene1919/vidaa/blob/main/scripts/test_client.py) (it is **not** bundled inside the HACS release zip). You can run it directly from a cloned git checkout, or download it standalone via:
+        > ```bash
+        > curl -sLO https://raw.githubusercontent.com/stevene1919/vidaa/main/scripts/test_client.py
+        > python3 test_client.py report --ip <YOUR_TV_IP>
+        > ```
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: "Prerequisites & Scope Acknowledgement"
+      description: "Please confirm the following baseline checks before submitting:"
+      options:
+        - label: "This issue is NOT related to HACS / marketplace setup, download errors, or GitHub token limits (refer to official HACS documentation)."
+          required: true
+        - label: "This issue is NOT a request for SSL certificate files, certificate extraction assistance, or SSL debugging (review [docs/certificates.md](https://github.com/stevene1919/vidaa/blob/main/docs/certificates.md))."
+          required: true
+        - label: "The TV / projector is powered ON and connected to the same local network / subnet as Home Assistant."
+          required: true
+        - label: "The TV / projector is reachable from Home Assistant on port 36669 (TCP/TLS) and port 38400 (HTTP/TCP)."
+          required: true
+        - label: "Client certificates or PKCS#12 bundles are valid, unencrypted, and placed in `/config/ssl/` per [docs/certificates.md](https://github.com/stevene1919/vidaa/blob/main/docs/certificates.md)."
+          required: true
+        - label: "I have reviewed [docs/troubleshooting.md](https://github.com/stevene1919/vidaa/blob/main/docs/troubleshooting.md) and restarted Home Assistant."
+          required: true
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: "Integration Version"
+      description: "Exact version installed (check in HACS → VIDAA Smart TV or manifest.json)."
+      placeholder: "e.g. v3.6.0"
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: "Home Assistant Core Version"
+      description: "Your Home Assistant version (Settings → About)."
+      placeholder: "e.g. 2026.10.4"
+    validations:
+      required: true
+
+  - type: input
+    id: device_brand
+    attributes:
+      label: "Device Brand & Form Factor"
+      description: "Brand and form factor (e.g. Hisense TV, Toshiba TV, Loewe TV, Philips/TPV TV, Sharp TV, JVC TV, TOPTRO Projector, etc.)."
+      placeholder: "e.g. Hisense TV, Toshiba TV, TOPTRO Smart Projector"
+    validations:
+      required: true
+
+  - type: input
+    id: tv_model
+    attributes:
+      label: "Device Model & Firmware Build"
+      description: "Your TV or projector model name and VIDAA firmware build string (Settings → Support → System Info)."
+      placeholder: "e.g. 65U7HQ / VIDAA U6 / Build V0000.09.09U.P1027"
+    validations:
+      required: true
+
+  - type: input
+    id: profile_telemetry
+    attributes:
+      label: "Configured Brand & Auth Profile (Diagnostic Telemetry)"
+      description: "Values of sensor.<device>_brand_profile and sensor.<device>_auth_profile if available, or selected profiles in Setup/Options."
+      placeholder: "e.g. Brand: Auto Detect (Hisense) | Auth: Auto Detect (VIDAA 2.0)"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: cert_type
+    attributes:
+      label: "Certificate & Connection Setup"
+      description: "What certificates or connection setup are you using?"
+      options:
+        - "Auto-Detect / Default certificates in /config/ssl/"
+        - "Extracted PEM cert/key pair (remotenow_2018, vidaa_2024, etc.)"
+        - "PKCS#12 archive (.p12 / .pfx)"
+        - "Legacy Plaintext MQTT (Port 56669, unencrypted)"
+        - "Other / Custom"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Describe the Bug"
+      description: "A clear and concise description of what the issue is."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to Reproduce"
+      description: "Step-by-step actions that trigger the issue."
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: cli_output
+    attributes:
+      label: "CLI Diagnostic Report Output (Optional but Recommended)"
+      description: "Paste the output from `python3 test_client.py report --ip <TV_IP>` here if available."
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Home Assistant Logs / Tracebacks"
+      description: "Paste relevant log entries or tracebacks from Settings → System → Logs."
+      render: shell
+    validations:
+      required: false

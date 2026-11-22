@@ -1,0 +1,335 @@
+"""State models and telemetry parsers for VIDAA Smart TV."""
+
+from __future__ import annotations
+
+import contextlib
+from typing import TYPE_CHECKING, Any
+
+from .settings import (
+    DEFAULT_MENU_ID_BACKLIGHT,
+    DEFAULT_MENU_ID_BRIGHTNESS,
+    DEFAULT_MENU_ID_CONTRAST,
+    DEFAULT_MENU_ID_PICTURE_MODE,
+    DEFAULT_MENU_ID_SOUND_MODE,
+    parse_settings_payload,
+)
+
+if TYPE_CHECKING:
+    from ..client import VidaaClient
+
+
+def apply_state_update(client: VidaaClient, data: Any) -> None:
+    """Updates client runtime state attributes from TV state payload."""
+    if not isinstance(data, dict):
+        return
+
+    statetype = str(data.get("statetype", "")).lower()
+    # Match fake_sleep_0 exactly: fake_sleep_1 means the TV is waking up (immediately
+    # followed by remote_launcher) and must be reported ON, not off.
+    if "off" in statetype or statetype == "fake_sleep_0":
+        client.state = "off"
+        if isinstance(getattr(client, "sources", None), list):
+            for s in client.sources:
+                if isinstance(s, dict):
+                    s["is_signal"] = "0"
+                    s["is_active"] = False
+                    s["isactive"] = False
+                    s["active"] = False
+    elif statetype in ("screen_saver", "screensaver"):
+        client.state = "screensaver"
+    elif statetype or data.get("is_power_on") in (1, "1", True):
+        client.state = "on"
+
+    if "sourcename" in data:
+        client.current_source = data["sourcename"]
+    elif "sourceid" in data:
+        source_id_str = str(data["sourceid"])
+        if source_id_str.upper() == "TV" or statetype == "livetv":
+            client.current_source = "TV"
+        else:
+            sources = getattr(client, "sources", [])
+            matched_name = None
+            if sources:
+                for source in sources:
+                    if (
+                        isinstance(source, dict)
+                        and str(source.get("sourceid", "")).strip().lower() == source_id_str.strip().lower()
+                    ):
+                        matched_name = source.get("sourcename") or source.get("displayname")
+                        break
+            client.current_source = matched_name or source_id_str
+    elif statetype == "livetv":
+        client.current_source = "TV"
+
+    if "sourceid" in data:
+        client.current_source_id = str(data["sourceid"])
+    elif statetype == "livetv":
+        client.current_source_id = "TV"
+    if "appname" in data:
+        client.current_app = data["appname"]
+    elif statetype in ("launcher", "remote_launcher"):
+        client.current_app = "Home Launcher"
+        client.current_app_id = None
+    if "appid" in data:
+        client.current_app_id = str(data["appid"])
+    if "channel_name" in data:
+        client.current_channel = data["channel_name"]
+    if "program_title" in data:
+        client.current_program = data["program_title"]
+    if "channel_num" in data:
+        client.channel_number = str(data["channel_num"])
+    if "audio_output" in data:
+        client.audio_output_mode = str(data["audio_output"])
+    if "hdr_mode" in data:
+        client.hdr_mode = str(data["hdr_mode"])
+    if "audio_format" in data:
+        client.audio_format = str(data["audio_format"])
+    if "devicename" in data or "device_name" in data or "friendly_name" in data:
+        name = data.get("devicename") or data.get("device_name") or data.get("friendly_name")
+        if name and str(name).strip() and str(name).strip() != "Renderer":
+            client.device_name = str(name).strip()
+    if "sleep_time" in data:
+        with contextlib.suppress(ValueError, TypeError):
+            client.sleep_timer = int(data["sleep_time"])
+
+
+def apply_device_info_update(client: VidaaClient, data: Any) -> None:
+    """Updates client device information attributes from TV device info payload."""
+    if not isinstance(data, dict):
+        return
+
+    name = (
+        data.get("devicename")
+        or data.get("device_name")
+        or data.get("friendly_name")
+        or data.get("tv_name")
+        or data.get("name")
+    )
+    if name and str(name).strip() and str(name).strip() != "Renderer":
+        client.device_name = str(name).strip()
+
+    model = (
+        data.get("model_name")
+        or data.get("model_code")
+        or data.get("tv_model")
+        or data.get("model")
+        or data.get("modelNumber")
+    )
+    if model and str(model).strip():
+        client.model_name = str(model).strip()
+
+    manufacturer_name = data.get("manufacturer") or data.get("brand") or data.get("brand_name") or data.get("vendor")
+    if manufacturer_name and str(manufacturer_name).strip():
+        m_str = str(manufacturer_name).strip()
+        from ..const import BRAND_MAP, GENERIC_MANUFACTURERS
+
+        if m_str.lower() not in GENERIC_MANUFACTURERS:
+            client.manufacturer = BRAND_MAP.get(m_str.lower(), m_str)
+
+    firmware_version = (
+        data.get("firmware_version")
+        or data.get("sw_version")
+        or data.get("tv_version")
+        or data.get("uVersion")
+        or data.get("version")
+    )
+    if firmware_version and str(firmware_version).strip():
+        client.firmware_version = str(firmware_version).strip()
+
+    platform = data.get("chip_platform") or data.get("platform")
+    if platform is not None and str(platform).strip():
+        client.hardware_platform = str(platform).strip()
+
+    mac_eth = data.get("eth0") or data.get("mac_eth") or data.get("mac_ethernet")
+    if mac_eth and str(mac_eth).strip():
+        cleaned_eth = str(mac_eth).replace(":", "").replace("-", "").lower().strip()
+        if len(cleaned_eth) == 12:
+            client.mac_ethernet = ":".join(cleaned_eth[i : i + 2] for i in range(0, 12, 2))
+
+    mac_wifi = data.get("wlan0") or data.get("mac_wifi") or data.get("mac_wlan")
+    if mac_wifi and str(mac_wifi).strip():
+        cleaned_wifi = str(mac_wifi).replace(":", "").replace("-", "").lower().strip()
+        if len(cleaned_wifi) == 12:
+            client.mac_wifi = ":".join(cleaned_wifi[i : i + 2] for i in range(0, 12, 2))
+
+    # gettvinfo provides authoritative live power state via fake_sleep_state:
+    # 0 = standby (fake_sleep_0), 1 = awake (fake_sleep_1 / on).
+    if data.get("fake_sleep", 1) in (1, "1", True) and "fake_sleep_state" in data:
+        sleep_state = data["fake_sleep_state"]
+        if sleep_state in (0, "0", False):
+            client.state = "off"
+        elif sleep_state in (1, "1", True) and getattr(client, "state", "off") in ("off", ""):
+            client.state = "on"
+
+
+def apply_volume_update(client: VidaaClient, data: Any) -> None:
+    """Updates client volume and mute attributes from TV volume payload."""
+    if not isinstance(data, dict):
+        return
+
+    volume_type = data.get("volume_type")
+    # Volume level updates on master (0), ARC/eARC (1), or unspecified volume broadcasts
+    if volume_type in (0, "0", 1, "1", None):
+        if "volume_value" in data:
+            with contextlib.suppress(ValueError, TypeError):
+                client.volume = int(data["volume_value"])
+        elif "volume" in data:
+            with contextlib.suppress(ValueError, TypeError):
+                client.volume = int(data["volume"])
+
+    # Mute status updates on mute broadcast (2) or explicit is_mute/muted fields
+    if volume_type in (2, "2"):
+        if "volume_value" in data:
+            client.muted = bool(data["volume_value"] in (1, "1", True))
+        elif "is_mute" in data:
+            client.muted = bool(data["is_mute"] in (1, "1", True))
+        elif "muted" in data:
+            client.muted = bool(data["muted"])
+    elif "is_mute" in data:
+        client.muted = bool(data["is_mute"] in (1, "1", True))
+    elif "muted" in data:
+        client.muted = bool(data["muted"])
+
+
+def apply_picture_update(client: VidaaClient, data: Any) -> None:
+    """Updates client picture settings from TV picture settings payload."""
+    parsed_items = parse_settings_payload(data)
+    for item in parsed_items:
+        existing = None
+        if isinstance(client.picture_settings, dict):
+            existing = client.picture_settings.get(item.menu_id)
+        elif isinstance(client.picture_settings, list):
+            for it in client.picture_settings:
+                if getattr(it, "menu_id", None) == item.menu_id:
+                    existing = it
+                    break
+
+        if existing is not None:
+            existing.value = item.value
+            if item.options:
+                existing.options = item.options
+            if item.min_value is not None:
+                existing.min_value = item.min_value
+            if item.max_value is not None:
+                existing.max_value = item.max_value
+            if item.step is not None:
+                existing.step = item.step
+            if not existing.name.startswith("Menu_") and item.name.startswith("Menu_"):
+                pass
+            else:
+                existing.name = item.name
+            target_item = existing
+        else:
+            if isinstance(client.picture_settings, dict):
+                client.picture_settings[item.menu_id] = item
+            elif isinstance(client.picture_settings, list):
+                client.picture_settings.append(item)
+            target_item = item
+
+        name_clean = target_item.name.lower()
+        menu_id = target_item.menu_id
+        if "mode" in name_clean or menu_id == DEFAULT_MENU_ID_PICTURE_MODE:
+            client.picture_mode = str(target_item.value)
+        elif "backlight" in name_clean or menu_id == DEFAULT_MENU_ID_BACKLIGHT:
+            with contextlib.suppress(ValueError, TypeError):
+                client.backlight = int(target_item.value)
+        elif "brightness" in name_clean or menu_id == DEFAULT_MENU_ID_BRIGHTNESS:
+            with contextlib.suppress(ValueError, TypeError):
+                client.brightness = int(target_item.value)
+        elif "contrast" in name_clean or menu_id == DEFAULT_MENU_ID_CONTRAST:
+            with contextlib.suppress(ValueError, TypeError):
+                client.contrast = int(target_item.value)
+
+
+def apply_sound_update(client: VidaaClient, data: Any) -> None:
+    """Updates client sound settings from TV sound settings payload."""
+    parsed_items = parse_settings_payload(data)
+    for item in parsed_items:
+        existing = None
+        if isinstance(client.sound_settings, dict):
+            existing = client.sound_settings.get(item.menu_id)
+        elif isinstance(client.sound_settings, list):
+            for it in client.sound_settings:
+                if getattr(it, "menu_id", None) == item.menu_id:
+                    existing = it
+                    break
+
+        if existing is not None:
+            existing.value = item.value
+            if item.options:
+                existing.options = item.options
+            if item.min_value is not None:
+                existing.min_value = item.min_value
+            if item.max_value is not None:
+                existing.max_value = item.max_value
+            if item.step is not None:
+                existing.step = item.step
+            if not existing.name.startswith("Menu_") and item.name.startswith("Menu_"):
+                pass
+            else:
+                existing.name = item.name
+            target_item = existing
+        else:
+            if isinstance(client.sound_settings, dict):
+                client.sound_settings[item.menu_id] = item
+            elif isinstance(client.sound_settings, list):
+                client.sound_settings.append(item)
+            target_item = item
+
+        if "mode" in target_item.name.lower() or target_item.menu_id == DEFAULT_MENU_ID_SOUND_MODE:
+            client.sound_mode = str(target_item.value)
+
+
+class TvStateMixin:
+    """Mixin holding all live telemetry and settings state for VIDAA Smart TV."""
+
+    def _init_runtime_state(self) -> None:
+        """Initializes all live state variables to clean defaults."""
+        self.connected: bool = False
+        self.auth_failed: bool = False
+        self.state: str = "off"
+        self.hotel_mode: bool = False
+        self.volume: int = 0
+        self.muted: bool = False
+        self.sources: list[dict[str, Any]] = []
+        self.current_source: str | None = None
+        self.current_source_id: str | None = None
+        self.apps: list[dict[str, Any]] = []
+        self.current_app: str | None = None
+        self.current_app_id: str | None = None
+        self.current_channel: str | None = None
+        self.current_program: str | None = None
+        self.channel_number: str | None = None
+        self.picture_mode: str | None = None
+        self.sound_mode: str | None = None
+        self.backlight: int | None = None
+        self.brightness: int | None = None
+        self.contrast: int | None = None
+        self.picture_settings: dict[int, Any] = {}
+        self.sound_settings: dict[int, Any] = {}
+        self.audio_output_mode: str | None = None
+        self.hdr_mode: str | None = None
+        self.audio_format: str | None = None
+        self.sleep_timer: int | None = None
+        self.device_name: str | None = None
+        self.model_name: str | None = None
+        self.manufacturer: str | None = None
+        self.firmware_version: str | None = None
+        self.hardware_platform: str | None = None
+        self.mac_wifi: str | None = None
+        self.mac_ethernet: str | None = None
+        self.clock_offset: int = 0
+        self.last_clock_sync: float = 0.0
+        self.tv_timestamp: int | None = None
+
+    @property
+    def is_on(self) -> bool:
+        """Returns True if the TV is connected and active."""
+        return self.state not in ("off", "")
+
+    @is_on.setter
+    def is_on(self, value: bool) -> None:
+        """Sets the power state."""
+        self.state = "on" if value else "off"
+        if hasattr(self, "_update_wake_event"):
+            self._update_wake_event()

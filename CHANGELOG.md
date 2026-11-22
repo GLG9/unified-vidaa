@@ -1,0 +1,1069 @@
+# Changelog
+
+All notable changes to the VIDAA Smart TV integration will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+<!--
+NOTE FOR AI AGENTS & CONTRIBUTORS:
+Each release section in this file is automatically extracted by `.github/workflows/release.yml`
+to generate GitHub Release notes and the HACS changelog view.
+You MUST adhere strictly to the following semantic structure for any new release:
+
+## [X.Y.Z] - YYYY-MM-DD
+
+### ☕ Support the Project
+[Ko-fi badge & link]
+
+---
+
+[Friendly greeting & 1-2 sentence release summary]
+
+---
+
+### 🌟 What's New & Highlights
+- **[Friendly Feature / Fix Title]**:
+  - Clear, accessible explanation of user impact and benefits (no internal code/class jargon).
+  - Relevant GitHub issue links (e.g. [#123](https://github.com/stevene1919/vidaa/issues/123)).
+
+---
+
+<details>
+<summary>🛠️ <b>Full Technical Details & Refactoring</b> (Click to expand)</summary>
+
+- Deep architectural, protocol, and code-level refactoring bullets.
+
+</details>
+
+---
+
+### 💬 Feedback & Bug Reports
+Please report any issues or feedback on [GitHub Issues](https://github.com/stevene1919/vidaa/issues) or Discussions!
+-->
+
+## [3.6.0] - 2026-11-21
+
+### ☕ Support the Project
+
+If this integration makes controlling your smart home entertainment a breeze, consider supporting continued open-source development and reverse-engineering:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+---
+
+Hey everyone! 👋 
+
+This release brings a huge round of quality-of-life improvements, faster wake-up times, and rock-solid state synchronization. Here is a breakdown of the key highlights in **v3.6.0**:
+
+---
+
+### 🎮 The Remote Entity is Now Always Ready
+You no longer need to dig through options to enable the remote entity. Starting in `v3.6.0`, the **`remote`** platform is an always-enabled core component alongside `media_player`. Navigation arrows, volume stepping, custom key sequences, and Lovelace remote cards work straight out of the box with zero extra setup.
+
+---
+
+### ⚡ Instant Reactive Wake & Auto-Wake Readiness
+* **Zero Waiting When Turning On**: Waking the TV now uses instant reactive event listeners. As soon as the TV's network and internal broker wake up, Home Assistant connects immediately—no more waiting around for arbitrary polling intervals.
+* **Auto-Wake on Playback & App Launch**: If your TV is sleeping and you select an HDMI input, launch YouTube/Netflix, or play media, Home Assistant automatically wakes the TV and waits until it is fully ready before launching your app or switching inputs.
+* **No More "Ghost" Power States**: If your TV is turned off at the wall, unplugged, or Wake-on-LAN times out, dashboard switches and power buttons will no longer bounce back and forth or falsely show as "on". Home Assistant stays strictly synchronized with your real hardware state.
+
+---
+
+### 📡 Sub-Second Boot Detection & Older TV Compatibility
+* **Sub-Second Wake Telemetry**: Big shoutout to the community on [#71](https://github.com/stevene1919/vidaa/issues/71)! Through physical hardware testing, we confirmed that VIDAA TVs broadcast a silent status heartbeat the moment they finish booting. We now listen for this telemetry to detect when your TV wakes up in under 500ms.
+* **Better Older TV Support**: Older Hisense models (such as the B7100 series) using static authentication profiles now connect cleanly over TLS without requiring custom certificate files.
+
+---
+
+### 📺 A Cleaner, Simpler Dashboard
+* **Unified Power Button**: We eliminated the split Power On / Power Off buttons on cards ([#55](https://github.com/stevene1919/vidaa/issues/55)). You now have a single, clean power button that behaves just like your physical remote.
+* **Rapid Remote Clicks**: Fixed an issue where repeating keys or rapid button clicks in quick succession could fail ([#70](https://github.com/stevene1919/vidaa/issues/70)).
+* **Less Entity Clutter**: Hotel Mode is now cleanly exposed as an attribute on your media player (`state_attr('media_player.hisense_tv', 'hotel_mode')`), keeping your entity list tidy.
+
+---
+
+### 🩺 Clear Alerts & One-Click Re-Pairing
+* **No More Silent Failures**: If an automation or dashboard button triggers while the TV is offline or unplugged, Home Assistant now surfaces a clear, actionable notification (e.g. *"TV offline: Device unreachable"*) instead of failing silently.
+* **Start Re-authentication Button**: If an unexpected power outage ever wipes your TV's stored pairing tokens, clicking the new **Start Re-authentication** button opens a repair item under **Settings → System → Repairs** and sends you a clickable notification to complete the 4-digit PIN setup right away.
+* **Smart Dual-Interface Wake-on-LAN**: If your TV is connected over Wi-Fi but also has an Ethernet cable plugged in, Home Assistant automatically extracts both MAC addresses and wakes both interfaces simultaneously.
+
+---
+
+<details>
+<summary>🛠️ <b>Full Technical Details & Refactoring</b> (Click to expand)</summary>
+
+- **Wake-on-LAN & Auto-Wake Readiness Flow**:
+  - Implemented `async_wait_until_awake()` using an `asyncio.Event` triggered immediately by connection and state telemetry (`statetype` or `volumechange`), eliminating arbitrary sleep loops.
+  - Added `nudge_reconnect()` to wake backoff reconnect sleep early via `self._reconnect_event` without tearing down or churning the supervisor background task.
+  - Removed optimistic `client.is_on = True` assignments on WoL transmission; `async_turn_on_tv` awaits readiness and keeps `is_on = False` if WoL fails or times out.
+  - Updated `async_play_media`, `async_select_source`, and `handle_launch_app` to call `async_turn_on()` and await `async_wait_until_awake()` before command execution when TV is off.
+- **Standardized Remote Platform & Options Cleanup**:
+  - Retired `enable_remote` options and config toggle, standardizing `remote` as an unconditionally loaded platform alongside `media_player`.
+  - Maintained `CONF_ENABLE_REMOTE` as a deprecated constant for backward compatibility.
+  - Cleaned up option schemas, descriptions, tooltips, and localization strings across all 12 supported languages.
+- **Passive Wake Detection & Command Guards**:
+  - Subscribed to `volumechange` and `tvwake` topics during boot; TVs broadcast volume telemetry ~500ms after boot, triggering instant wake state transitions from deep standby.
+  - Guarded against initial state race conditions by waiting for state resolution on reconnect before sending power keys.
+  - Guarded against volume, playback controls, and service calls when TV is powered off or offline.
+- **Always-On Standby Token Renewal**:
+  - Enabled standby token renewal by default to maintain background token validity and removed the redundant UI option toggle.
+- **Dual MAC Address Auto-Extraction & Wake-on-LAN**:
+  - Automatically parses both Wi-Fi (`macWifi`) and Ethernet (`macEthernet`) MAC addresses from UPnP descriptors and matches the active ARP interface.
+  - Automatically populates `secondary_mac_address` in config entries and setup flows, broadcasting Wake-on-LAN packets across both interfaces simultaneously.
+- **Single Power Toggle & Media Transport Controls (#55)**:
+  - Eliminated split `|` (Power On) and `O` (Power Off) buttons when enabling media controls, restoring a unified power standby button (`mdi:power-standby`) across all Lovelace entity cards and device pages.
+  - Retired artificial `assumed_state: True` flag in favor of dynamic `MediaPlayerState.PLAYING` / `STATE_PAUSED` state transitions while media controls are active.
+- **Action Exceptions & Reliable Error Surfacing (`action-exceptions`)**:
+  - Custom domain actions (`vidaa.send_key`, `vidaa.launch_app`, `vidaa.open_browser`, `vidaa.send_key_sequence`, `vidaa.set_tv_setting`, and `vidaa.select_audio_output`) and entity platforms now explicitly raise `HomeAssistantError` (`auth_required`, `not_connected`, `turn_on_failed`) instead of silent command delivery failures.
+  - Action calls return structured execution telemetry (`{"success": true/false}`) directly to Home Assistant for branching automations.
+- **Legacy Static TLS Without Client Certificates (#71)**:
+  - Enabled TLS 1.2 on port 36669 for Legacy Static authentication profiles without requiring client certificates, preventing setup blocks (`certs_not_found`) and connection timeouts on older models (such as Hisense B7100 series).
+- **Streamlined Entity Registry & Hotel Mode**:
+  - Retired standalone `hotel_mode` binary sensor in favor of clean `hotel_mode` extra state attribute on the `media_player` entity. Automatically purges deprecated binary sensor from Home Assistant's entity registry on startup.
+- **Diagnostic Maintenance Suite**:
+  - Renamed `trigger_reauth` to **Start re-authentication** (`button.<tv>_start_re_authentication`), added automatic WoL wake pulse before PIN requests, and added clickable persistent notifications directing to Repairs and Integrations.
+  - Enhanced **Force reconnect** (`button.<tv>_force_reconnect`) to clear exponential backoff cooldowns, await connection resolution up to 3s, and surface actionable errors instead of false positive completions.
+  - Added **Probe capabilities** button (`button.<tv>_probe_capabilities`) to actively query picture and sound menu capabilities over MQTT.
+  - Added **Authentication problem** sensor (`binary_sensor.<tv>_authentication_problem`).
+- **Remote Entity Typing & Sanitization (#70)**:
+  - Coerced `key_repeat` options to integers and sanitized `num_repeats` handling to prevent typing errors during rapid command sequences.
+- **Standalone CLI Diagnostics & Zero-Setup Runner**:
+  - Decoupled core client modules from Home Assistant test stubs, allowing standalone troubleshooting tools (`scripts/test_client.py` and `scripts/diag.sh`) to run in bare Python environments.
+  - Added real-time `/remoteapp/#` wildcard packet sniffing (`sniff` command) for OEM debugging.
+- **Documentation & Recipe Additions**:
+  - Added Recipe 5A (IR blaster turn-on) and Recipe 5B (automated WoL fallback) to `docs/services_and_automations.md`.
+  - Documented ~15-minute transitional standby delay on modern VIDAA U6 models before WoWLAN packet filter becomes active in deep sleep.
+  - Fixed recipe and section numbering across automation documentation.
+- **Comprehensive Test Suite**:
+  - 380 modular unit tests passing with 100% coverage across actions, protocol, power transitions, options flow, and lifecycle.
+
+</details>
+
+---
+
+### 💬 Feedback & Bug Reports
+Please report any issues or feedback on [GitHub Issues](https://github.com/stevene1919/vidaa/issues) or Discussions!
+
+## [3.5.1] - 2026-11-14
+
+### ☕ Support the Project
+
+If this integration makes controlling your smart home entertainment a breeze, consider supporting continued open-source development:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+### 🐛 Bug Fixes & Improvements
+
+- **UNIFIED CLI DIAGNOSTICS & ZERO-SETUP RUNNER (`diag.sh`)**:
+  - Decoupled `client.py`, `protocol/`, and `const.py` from Home Assistant core dependencies so CLI tools run in standalone environments without requiring `pytest` or Home Assistant stubs.
+  - Added `scripts/diag.sh`: a zero-setup one-liner runner that automatically fetches prerequisites and runs full diagnostics for quick GitHub issue reporting with zero manual cloning or environment setup.
+  - Consolidated `scripts/debug_tv.py` actions into the unified `scripts/test_client.py` utility (adding `state`, `source`, `monitor`, and `pair` subcommands).
+  - Standardized internal classes and imports to `VidaaUpnpClient` and `VidaaClient` across the codebase.
+- **CLEAN HOME ASSISTANT STARTUP (No More `IntegrationNotFound` Warning)**:
+  - Fixed a startup error (`Failed to load services.yaml for integration: hisense_vidaa`) that appeared after migrating to `v3.5.0` and removing the old folder.
+  - Legacy action aliases (e.g. `hisense_vidaa.send_key`) now register full schema descriptions directly with Home Assistant, keeping your startup logs clean and your existing automations running smoothly (#66).
+- **SMART STANDBY DETECTION & HDMI EXTERNAL DEVICES**:
+  - Fixed an issue where projectors (such as TOPTRO) or TVs with external streaming boxes (like Apple TV or Chromecast) falsely showed as "on" in Home Assistant after a restart while the display was actually in standby (#61).
+  - Toggling power off now reliably turns off the device rather than accidentally turning it on when HDMI signals remain active (#61).
+  - Improved live power state synchronization so running TVs that wake up during a restart are recognized instantly without delays (#53).
+- **SIMPLIFIED KEYSTORE EXTRACTION**:
+  - Updated documentation to highlight the standard `res/raw/client_mobile_android.p12` keystore path found when unzipping official companion APKs, saving time for new users (#65).
+- **SMART SERVICES PAIRING NOTICE**:
+  - Added clear setup guidance explaining that TV "Smart / Connected Services" must be accepted in TV settings for the 4-digit pairing PIN to display on screen, alongside router firewall tips for complete local-only isolation (#64).
+
+## [3.5.0] - 2026-11-14 — 🚀 VIDAA Smart TV Rebrand Edition
+
+This major milestone rebrands the integration to **VIDAA Smart TV** (`vidaa`), celebrating full universal support across all TV and projector manufacturers powered by VIDAA OS (Hisense, Toshiba, Loewe, Philips, Sharp, JVC, TOPTRO, and regional brands).
+
+### ☕ Support the Project
+
+If this integration makes controlling your smart home entertainment a breeze, consider supporting continued open-source development:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+### 🌟 What's New & Highlights in v3.5.0
+
+- **UNIVERSAL VIDAA REBRAND (`vidaa`)**:
+  - Rebranded the integration domain to `vidaa` and integration title to **VIDAA Smart TV**.
+  - Added official VIDAA iconography, vibrant high-res logos, and brand artwork.
+  - Complete native localization across 11 languages (`de`, `es`, `fr`, `it`, `pt`, `pt-BR`, `ru`, `sr`, `sr-Latn`, `uk`, `zh-Hans`).
+  - Seamlessly refactored all internal classes to `Vidaa*` while preserving backwards-compatible aliases for custom scripts.
+- **ZERO-EFFORT AUTOMATIC MIGRATION (No Re-Pairing Needed)**:
+  - **Automatic Setup Upgrade**: Existing TVs automatically upgrade from configuration v1 to v2.1—no need to enter PINs or re-pair.
+  - **Preserved Dashboards & Names**: All entity IDs, custom names, area assignments, and dashboard cards are preserved seamlessly.
+  - **Backward-Compatible Automations**: All existing `hisense_vidaa.*` actions and device triggers continue working alongside the new canonical `vidaa.*` actions.
+  - **Clean Up Alerts**: Includes a friendly Home Assistant Repairs notification to help you safely delete the obsolete `hisense_vidaa` folder after upgrading.
+- **HDMI-CEC INPUT DISCOVERY & DEVICE NAMES**:
+  - **Friendly Input Names**: Your TV now automatically discovers and shows friendly names for connected HDMI devices (e.g., `HDMI 1 (Chromecast)` or `HDMI 2 (PlayStation 5)`) in your source list.
+  - **Direct Device Selection**: Switch directly by selecting the device name from the dropdown.
+  - Cleaned up attributes so inputs display neatly without repeating names.
+- **SMART AUTO POWER-ON**:
+  - Selecting an input or playing media while your TV is off or in standby will now automatically wake and turn on the TV for you.
+- **STREAMLINED AUDIO ROUTING**:
+  - Audio output is now cleanly reported as an `audio_output` attribute on your TV (`TV Speakers` or `ARC / eARC`), retiring clunky standalone select entities.
+- **SLEEK MEDIA PLAYER CONTROLS**:
+  - Media playback buttons (Play/Pause/Track) are now disabled by default to keep TV cards sleek and minimal. You can easily toggle them on anytime under **Configure → Sources & Media**.
+  - Restored persistent Previous/Next track and channel navigation buttons when media controls are active (#55).
+- **ACCURATE HOME LAUNCHER & TV INPUT DETECTION**:
+  - Added smart detection for the VIDAA Home screen (`remote_launcher`), accurately reporting when you return to the home screen.
+  - Fixed TV input sensors on restart so your TV never gets falsely stuck on "Standby" when turned on to an HDMI port.
+- **UNIFIED DIAGNOSTICS**:
+  - Consolidated diagnostic sensors into a single, clean Session Status sensor (`sensor.<tv>_session_status`), decluttering your entity list.
+  - Cleaned up hardware attributes (MAC address, model, software version) so they live properly in the Device Info card where Home Assistant expects them.
+- **REMOTE KEYBOARD & TEXT INPUT**:
+  - Added virtual text typing to `remote.send_command` using the `text:<string>` prefix, making on-screen searches and typing fast from automations and scripts.
+- **PERFORMANCE & FUTURE-PROOFING**:
+  - Non-blocking clock synchronization via UPnP HTTP executor threads (#59).
+  - Full Python 3.14 and Python 3.16 compatibility.
+  - Filtered duplicate discovery prompts when a TV is already configured on your network.
+
+## [3.3.2-beta.1] - 2026-11-08 — 📺 Media Player UI Controls Fix
+
+This beta pre-release resolves an issue where the Home Assistant media player card would hide the Previous and Next track/channel buttons when the TV was turned on.
+
+### 🌟 What's New & Fixed in v3.3.2-beta.1
+
+- **MEDIA PLAYER UI CONTROLS (#55)**:
+  - Fixed an issue where Home Assistant hid Previous/Next track and channel navigation buttons in the media player card while the TV is on.
+  - Controls now remain visible and accessible whenever media playback controls are enabled.
+
+## [3.3.1] - 2026-11-08 — 🚀 Wake-on-LAN Broadcast Fix, UI Setup Fix & Internationalization Edition
+
+This release resolves a critical Wake-on-LAN broadcast regression across subnets and relays, fixes a UI setup error (`not_implemented`) during initial device pairing, expands regional smart TV streaming app aliases for top analytics countries, adds full native translations for Russian, Ukrainian, and Simplified Chinese, and introduces multilingual documentation with dark-mode badges.
+
+### ☕ Support the Project
+
+If this integration has added value to your smart home setup, consider buying me a coffee to support continued development and maintenance:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+### 🌟 What's New & Fixed in v3.3.1
+
+- **WAKE-ON-LAN BROADCAST DISPATCH (#52)**:
+  - **Keyword Argument Preservation**: Switched executor dispatch in `tv/actions.py` to use `functools.partial(client.send_wake_on_lan, mac_targets, ip=getattr(client, "ip", None))` instead of passing IP positionally.
+  - **Dual Broadcast Recovery**: Restored broadcast packet delivery to both standard `255.255.255.255:9` and subnet-directed `<subnet>.255:9` alongside direct unicast, resolving power-on failures from deep standby across subnets and UDP relays (verified on Hisense PX3-Pro).
+- **STANDBY & SIGNAL GUARDING (#53)**:
+  - Guarded `KEY_POWER` toggling and active signal detection during TV fake sleep/standby transitions.
+- **CONFIG FLOW MRO INHERITANCE BUG FIX**:
+  - Reordered class inheritance in `HisenseVidaaConfigFlow` (`DiscoveryFlowMixin, ReauthFlowMixin, CertsFlowMixin, UserFlowMixin, config_entries.ConfigFlow`) so custom mixin implementations precede Home Assistant core stubs.
+  - Eliminates the `not_implemented` error dialog when adding or reconfiguring TVs in the UI.
+- **INTERNATIONALIZATION & NEW TRANSLATIONS**:
+  - Added complete 100% key-parity translations for **Russian** (`ru.json`), **Ukrainian** (`uk.json`), and **Simplified Chinese** (`zh-Hans.json`).
+  - Added dark-mode friendly SVG language switcher badges in `README.md` and created localized README guides in `docs/i18n/` for German, Italian, French, Russian, Ukrainian, and Simplified Chinese.
+- **REGIONAL SMART TV APP ALIASES**:
+  - Added streaming app aliases for France (France.tv, TF1+, 6play, Canal+), Germany & Austria (WOW, MagentaTV, Zattoo, ServusTV), Italy (TIMVISION), Eastern Europe & Ukraine (MEGOGO, Sweet.tv, Kyivstar TV), Russia (Kinopoisk, IVI, Okko, Wink, KION), China (iQIYI, Tencent Video, Youku, Bilibili, Mango TV), and Canada (TSN, Sportsnet, ICI TOU.TV).
+- **DEVELOPER TOOLING & REPOSITORY HYGIENE**:
+  - Relocated CLI utilities (`test_client.py`, `debug_tv.py`) to repository root `scripts/` to ensure they are excluded from HACS production zip releases.
+  - Hardened unit tests and CI workflow with hermetic mocks and `voluptuous` installation across Python 3.12 and 3.13.
+
+## [3.3.0] - 2026-11-07 — 📺 Context-Aware Channel Track Controls, Pluggable Turn-On Triggers & Source Filtering Edition
+
+This release introduces context-aware media player track stepping (channel surfing on Live TV vs. media skipping on apps/HDMI), channel name resolution in `play_media`, user-configurable source filtering in Options Flow, Home Assistant `PluggableAction` turn-on device automations, enhanced toast notification probes, and full Serbian translations.
+
+### ☕ Support the Project
+
+If this integration has added value to your smart home setup, consider buying me a coffee to support continued development and maintenance:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+### 🌟 What's New in v3.3.0
+
+- **CONTEXT-AWARE CHANNEL SURFING & TRACK CONTROLS (#55)**:
+  - **Dynamic Next/Previous Track Stepping**: `media_previous_track` and `media_next_track` dynamically send `KEY_CHANNELDOWN` and `KEY_CHANNELUP` when actively watching Live TV, and `KEY_BACK` / `KEY_FORWARDS` when on media apps or external inputs.
+  - **HDMI 'TV Input' False Positive Guard**: Implemented `is_live_tv_source()` to ensure external inputs (HDMI1–3, AV) reporting system container `appname='TV Input'` or `'TV'` are strictly treated as external sources and never trigger channel stepping.
+  - **Dynamic `media_content_type`**: Exposes `MediaType.CHANNEL` when tuned to Live TV, and `MediaType.APP` when running streaming apps.
+- **CHANNEL NAME MATCHING IN `play_media` (#55)**:
+  - `media_player.play_media` with `media_content_type: channel` now matches against TV channel names (e.g. `"ABC TV"`, `"Nine"`) in addition to numeric channel digits.
+- **USER-CONFIGURABLE SOURCE FILTERING (`CONF_SOURCES`) (#55)**:
+  - Added a multi-select source picker in Options Flow allowing users to customize and filter the inputs and apps shown on the media player card while preserving active source visibility.
+- **TURN-ON DEVICE AUTOMATION TRIGGER (`PluggableAction`) (#55)**:
+  - Added `device_trigger.py`, `triggers/turn_on.py`, and `triggers.yaml` supporting the `"Device is requested to turn on"` trigger. Users can attach custom actions (smart plugs, IR blasters, custom WoL) to turn on the TV, cleanly falling back to native Wake-on-LAN and `KEY_POWER` if unconfigured.
+- **NOTIFICATION PROBING & CANDIDATE TOPICS (#54)**:
+  - Updated notification dispatcher to publish across `actions/showmessage`, `actions/toast`, and `actions/notification` with dual `message` and `text` payload fields.
+  - Added `notify` command and `--probe` option to `test_client.py` for troubleshooting firmware toast compositor listeners.
+- **TRANSLATIONS (PR #50)**:
+  - Added official Serbian Cyrillic (`sr.json`) and Serbian Latin (`sr-Latn.json`) translations contributed by @cpmarexel2f.
+- **TEST SUITE & HARDENING**:
+  - Expanded test suite to 294 passing unit tests covering all trigger validations, media actions, and context guards.
+
+## [3.2.0] - 2026-11-05 — 🌐 Universal VIDAA OEM Multi-Brand & SSL Certificate Validation Edition
+
+This release expands the integration beyond Hisense-badged hardware to provide comprehensive, end-to-end support for all partner TV brands operating on the VIDAA Smart TV platform (including Toshiba, Loewe, TPV Technology / Philips, Schneider, Akai, Beko, and others). It also introduces robust client SSL certificate semantic and syntactic validation, enriched async UPnP descriptor parsing, and graceful Zeroconf / HomeKit metadata extraction.
+
+### ☕ Support the Project
+
+If this integration has added value to your smart home setup, consider buying me a coffee to support continued development and maintenance:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+### 🌟 What's New & Hardened in v3.2.0
+
+- **UNIVERSAL VIDAA OEM MULTI-BRAND SUPPORT**:
+  - Full cryptographic and lifecycle support for all licensed partner TV brands running VIDAA OS: Hisense (`his`), Toshiba (`tos`), Loewe / We. by Loewe (`loe`), TPV Technology / Philips / AOC (`tpv`), Sharp (`shp`), JVC (`jvc`), Schneider (`sch`), Akai (`aka`), Beko (`bek`), Telefunken (`tel`), Bush (`bus`), Vizio (`vic`), Philco (`phi`), Noblex (`nob`), Sansei (`san`), RCA (`rca`), Sinotec (`sin`), Vestel (`ves`), Brandt (`bra`), Metz (`met`), and Leica (`lei`).
+  - **Post-PIN Brand Overwrite Prevention (`flow_helpers.py`, `config_flow.py`)**: Fixed a critical bug where post-PIN device discovery defaulted to `"his"` and unconditionally clobbered a cascade- or cert-hinted OEM brand (`tos`, `loe`, `tpv`, `shp`, `jvc`) when UPnP was blocked across isolated VLANs or omitted `brand=`.
+  - **Dynamic Client Credential Regeneration on Brand Change (`client.py`, `__init__.py`)**: Changing the TV OEM brand in Options Flow or setup now automatically derives fresh brand-scoped pairing credentials (`client_id`, `username`, `password`) and invalidates stale tokens on `HisenseTvClient`, persisting the new credentials cleanly to `entry.data`.
+  - **Expanded Candidate OEM Brand Handshake Cascade (`protocol/pairing.py`)**: When pairing over manual IP or isolated IoT VLANs without UPnP discovery, if the broker rejects the initial connection with `rc: 5` (Not Authorized), the pairing engine automatically cascades through high-probability candidate brands (`tos`, `loe`, `tpv`, `shp`, `jvc`), auto-adopting the accepted brand and updating the Home Assistant device registry.
+  - **Automatic OEM Brand Detection from Certificate Filenames (`protocol/certs.py`)**: Added `detect_brand_from_cert_paths()`. Placing brand-named certificates in `/config/ssl/` (e.g. `toshiba.crt`, `loewe.pem`, `philips.crt`, `sharp.pem`, `jvc.key`, `rcamobile.p12`) automatically hints the TV manufacturer and pre-configures the dynamic OEM salt.
+  - **Manual IP Setup & Device Options Brand Selectors (`config_flow.py`, `options_flow.py`)**: Added `CONF_BRAND` selector dropdown to both the initial manual IP setup step and the Security Options menu, allowing users to explicitly select their TV OEM brand upfront or adjust it later.
+  - **Canonical Brand Normalization & 3-Letter Code Preservation (`discovery.py`)**: Updated `normalize_brand_code()` to tokenize word boundaries, avoiding false substring collisions (e.g. preventing `"unrecognized_brand"` from matching `"bra"` Brandt), while preserving explicit 3-letter alphanumeric codes (`brand=xyz`) from UPnP `<modelDescription>`.
+  - **UPnP Descriptor MAC Fallbacks (`tv/upnp_desc.py`, `protocol/upnp.py`)**: Supported `mac` and `network_device` as fallback MAC keys in UPnP XML descriptors alongside `macWifi`.
+  - **Brand-Aware Diagnostics & Sensor Fallbacks (`sensors_diagnostic.py`, `tv/probe.py`, `client.py`)**: Diagnostic sensors, default friendly names, and probe Markdown reports now dynamically reflect the resolved TV OEM brand rather than hardcoding `"Hisense"`.
+  - **CLI Diagnostics Multi-Brand Support**: Added `--brand` parameter to [`test_client.py`](test_client.py) and [`debug_tv.py`](debug_tv.py) with open brand support.
+- **TOPTRO SMART PROJECTOR SUPPORT & OEM BRAND PROPAGATION (`const.py`, `discovery.py`, `protocol/auth.py`, `protocol/pairing.py`, `client.py`)**:
+  - Added official OEM brand support for **TOPTRO** portable smart projectors running VIDAA OS (e.g. FreeStyle series), mapping `tpo` and `toptro` across `BRAND_OPTIONS`, `BRAND_MAP`, and `BRAND_CODE_MAP`.
+  - Expanded the pairing cascade fallback candidate list to automatically probe `tpo` alongside `tos`, `loe`, `tpv`, `shp`, and `jvc` when initial connections to projector brokers fail.
+  - Enhanced `async_probe_tv_auth_methods()` and `HisenseTvClient.async_probe_auth_methods()` to propagate synchronized device clock timestamps (`timestamp=int(time.time()) + self.clock_offset`) and active OEM brand prefixes.
+  - Hardened MQTT diagnostic classification across both MQTT 3.1.1 (`rc: 4`, `rc: 5`) and MQTT 5.0 (`rc: 134`, `rc: 135`) using `AUTH_REJECTION_CODES`, ensuring bad credentials and permission rejections are cleanly reported as `"not_authorized"` rather than generic network connection errors.
+  - Dynamic brand refresh in pairing handshake: auto-detects and updates `client.brand` from UPnP descriptor fingerprints before pairing if `client.brand` is still at default (`"his"`), safeguarding manual brand overrides.
+- **"AUTO-DETECT" BRAND OPTION & DEDICATED BRAND PROFILE DIAGNOSTIC SENSOR (`const.py`, `config_flow.py`, `sensor.py`, `sensors_diagnostic.py`, `flow_helpers.py`, `flow_reauth.py`, `options_flow.py`, `translations/*.json`)**:
+  - Added `"auto": "Auto Detect (Recommended)"` as the default option in the setup and options brand selectors (`BRAND_OPTIONS`, `DEFAULT_BRAND_OPTION`), matching the authentication profile UX.
+  - Streamlined manual setup: users only need to type their TV/projector IP address; the integration queries the UPnP descriptor on port 38400, extracts `brand=...` from `<modelDescription>`, normalizes the code, and resolves OEM branding with zero manual intervention.
+  - Added a dedicated diagnostic entity: `HisenseVidaaBrandProfileSensor` (`sensor.<device>_brand_profile`), displaying the configured brand profile (`Auto Detect (Recommended)`, `Hisense`, `Toshiba`, `TOPTRO`, etc.) along with diagnostic attributes (`configured_profile`, `active_brand_code`, `active_brand`).
+  - Added localized translations for `brand_profile` and selector options across English, German, Spanish, French, Italian, and Portuguese (`en.json`, `de.json`, `es.json`, `fr.json`, `it.json`, `pt.json`, `pt-BR.json`).
+- **SSL CLIENT CERTIFICATE INTEGRITY VALIDATION (`protocol/certs.py`)**:
+  - Implemented strict PEM certificate and private key validation via `validate_ssl_certs()`.
+  - Validates BEGIN/END headers, Base64 decoding, ASN.1 structure, modulus matching between certificate and private key, and PKCS#8 decryption without hard external cryptography dependencies.
+  - Provides clear, actionable error feedback when invalid or mismatched certificates are uploaded during manual certificate setup.
+  - Clarified universal app architecture in documentation: the official **VIDAA Smart TV** app (`com.universal.remote.multi`) is universal across all brands and its client certificate (`CN=VidaaAppAndroidV01`) authenticates with any VIDAA OS TV.
+- **EVENT LOOP NON-BLOCKING CERTIFICATE RESOLUTION & PKCS#12 CACHING (`__init__.py`, `client.py`, `protocol/certs.py`, `config_flow.py`, `flow_reauth.py`)**:
+  - Resolves GitHub issue [#49](https://github.com/stevene1919/hisense_vidaa/issues/49) (`Detected blocking call to open with args inside the event loop`).
+  - Offloaded certificate path searches, `resolve_certificates()`, and `resolve_ca_certificate()` in `async_setup_entry` to Home Assistant's threadpool executor via `hass.async_add_executor_job()`.
+  - Hardened `HisenseTvClient.__init__` to skip disk certificate scans and resolution entirely when `use_ssl=False`, for legacy/static auth profiles, or when valid pre-resolved PEM certificate and key paths are supplied.
+  - Added timestamp-based (`mtime`) disk caching in `extract_pkcs12_to_pem()` to reuse existing extracted PEM certificate and key files on subsequent startups without re-reading the `.p12` archive, performing write-access probe checks, or rewriting files.
+  - Ensured `_async_resolve_ssl_certs()` runs in the executor before client initialization in all config flow and re-authentication paths.
+- **ASYNC UPnP `<modelDescription>` CAPABILITY EXTRACTION (`protocol/upnp.py`)**:
+  - Enhanced `HisenseUpnpClient.async_get_device_fingerprint()` to parse `<modelDescription>` as key-value pairs, extracting `brand`, `platform`, `vidaa_support`, `voice`, `transport_protocol`, `mac_wifi`, and `mac_ethernet` asynchronously.
+- **ZEROCONF / HOMEKIT mDNS METADATA ENRICHMENT (`discovery.py`)**:
+  - Enriched `parse_zeroconf_discovery()` to extract actual model names (`md`/`model`) and manufacturer branding from mDNS TXT properties advertised by Apple HomeKit / AirPlay (`_hap._tcp.local.`, `_airplay._tcp.local.`).
+  - Completely decoupled from control: graceful fallback to defaults if HomeKit/AirPlay is disabled or properties are absent.
+- **TEST SUITE MODULARIZATION & EXPANSION (262 PASSING TESTS)**:
+  - Decoupled oversized test suites into modular, single-responsibility modules:
+    - Split `test_client_auth.py` into `test_client_tokens.py` (token lifecycle/drift/standby), `test_client_reconnect.py` (reconnect locks/backoff/rejection thresholds), and `test_client_auth.py` (core auth profiles/probing).
+    - Split `test_pairing.py` into `test_pairing_guards.py` (abort flow/duplicate guards), `test_pairing_cascade.py` (brand fallback cascade/profile fallback), and `test_pairing.py` (PIN challenge probing/flows).
+    - Split `test_services.py` into `test_services_targeting.py` (device/area/floor/label resolution & guards) and `test_services.py` (service executions).
+    - Added [`test_multi_brand_readiness.py`](tests/test_multi_brand_readiness.py) covering OEM brand selectors, code preservation, cert hinting, UPnP MAC fallbacks, client ID regeneration, and post-PIN brand preservation.
+    - Added comprehensive regression coverage for TOPTRO discovery, brand normalization, and probe rejection diagnostics in `tests/test_client_auth.py` and `tests/test_discovery.py`.
+  - 100% passing test suite across all 262 unit tests with 0 linter errors and 0 Hassfest errors.
+
+## [3.1.0] - 2026-11-01 — ⚡ Native `aiomqtt` Async Engine & Architecture Hardening Edition
+
+This release marks a major architectural milestone for the Hisense VIDAA TV integration, completing a full migration to native async MQTT (`aiomqtt>=2.3.0`), eliminating all threaded callbacks and executor offloading, modernizing Lovelace remote card designs, standardizing documentation examples, and achieving complete architectural compliance with all 54 Home Assistant Integration Quality Scale rules in `quality_scale.yaml`.
+
+### ☕ Support the Project
+
+If this integration has added value to your smart home setup, consider buying me a coffee to support continued development and maintenance:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+### 🌟 What's New & Hardened in v3.1.0
+
+- **NATIVE `aiomqtt>=2.3.0` ASYNC TRANSPORT ENGINE (`async-dependency: done`)**:
+  - Replaced legacy threaded `paho-mqtt` (`loop_start()` / `loop_stop()`, `threading.Timer`, `threading.Lock`, `threading.Thread`, and cross-thread `hass.loop.call_soon_threadsafe`) with native `aiomqtt.Client` async context managers running directly on Home Assistant's event loop.
+  - Replaced synchronous locks and thread sleeps with `asyncio.Task`, `asyncio.Lock`, and `asyncio.Future` query routing for snappy, non-blocking TV state requests and commands.
+  - Eliminated unnecessary `hass.async_add_executor_job` invocations across all platforms (`media_player`, `remote`, `button`, `switch`, `select`, `number`, `notify`, `services`).
+- **SHARED `aiohttp.ClientSession` WEBSESSION INJECTION (`inject-websession: done`)**:
+  - Injected Home Assistant's shared `aiohttp.ClientSession` via `async_get_clientsession(hass)` into `HisenseTvClient` and `HisenseUpnpClient`.
+  - Added non-blocking async UPnP HTTP `Date` header synchronization (`async_get_tv_timestamp`) and device fingerprinting (`async_get_device_fingerprint`), replacing legacy `urllib.request.urlopen`.
+- **LOVELACE REMOTE EXAMPLES & DARK MODE MODERNIZATION (`examples/`)**:
+  - Optimized `examples/lovelace-australian-remote-card.yaml` and `examples/lovelace-us-remote-card.yaml` for Home Assistant dark mode and browser rendering engines.
+  - Added `keep` config (`background: true`, `box_shadow: true`, `border_radius: true`) to `custom:stack-in-card` to eliminate seam artifacts between card segments.
+  - Protected buttons against Chrome/Blink auto-dark-mode contrast inversion with `forced-color-adjust: none` and `color-scheme: light`.
+  - Enhanced Australian remote with authentic Stan branding, white pill styling for streaming apps, glowing borders, and 3D tactile gradients on colored navigation buttons.
+  - Redesigned power button with circular recessed styling and illuminated red status icon.
+  - Updated high-resolution brand assets (`brand/icon@2x.png`, `brand/logo@2x.png`) and integration screenshots.
+- **STANDARDIZED ENTITY IDS ACROSS EXAMPLES & AUTOMATION DOCS (`examples/`, `docs/`)**:
+  - Standardized entity IDs to `living_room_hisense_vidaa_tv` across all 6 Lovelace card examples (`australian-remote`, `us-remote`, `classic-remote`, `button-card-remote`, `android-tv-card`, `tv-card`) and throughout `docs/services_and_automations.md`.
+- **MULTI-DEVICE SERVICE TARGET AMBIGUITY GUARD (`services_target.py`)**:
+  - Safeguarded custom services (`send_key`, `launch_app`, `send_text_input`, `set_picture_setting`, `set_sound_setting`, `send_key_sequence`, `change_channel`) from unintended broadcast when multiple TVs are present.
+  - Single configured TV: Automatically executes without requiring target selectors (zero breaking changes for single-TV homes).
+  - Multiple configured TVs without target: Raises `ServiceValidationError` (`ambiguous_target`) prompting for specific target.
+  - Multi-TV broadcast: Explicitly broadcast to all configured TVs using `entity_id: "all"`.
+  - Full localization added across 7 languages (`en`, `de`, `es`, `fr`, `it`, `pt`, `pt-BR`) in `strings.json` and translation catalogs.
+- **TV USB POWER LIMITATIONS & STANDBY BROWNOUT DOCUMENTATION (`docs/power_and_standby_settings.md`)**:
+  - Documented volatile token memory wipes caused by external streaming sticks (Chromecast, Fire TV, Roku) powered by TV USB ports during standby transitions, providing power and standby mitigation instructions.
+- **PROTOCOL & EVENT LOOP RUNTIMEWARNING FIX (`protocol/ping.py`)**:
+  - Closed unspawned coroutines cleanly when the event loop is absent to eliminate Python `RuntimeWarning` messages in test harnesses and standalone scripts.
+- **INTEGRATION QUALITY SCALE ALIGNMENT (`quality_scale.yaml`)**:
+  - Formally achieved 100% rule compliance across all 54 Bronze, Silver, Gold, and Platinum rules in `quality_scale.yaml` (`async-dependency`, `inject-websession`, `strict-typing`, `reconfiguration-flow`, `runtime-data`).
+  - Conservatively retains `manifest.json` at `"quality_scale": "bronze"` in accordance with Home Assistant Core staged review policy.
+- **EXPANDED TEST SUITE (224 TESTS PASSING)**:
+  - Expanded unit test coverage across async MQTT lifecycle, proactive token refresh in standby, multi-device ambiguity guards, Websession retention, and Hassfest container verification.
+
+## [3.0.0] - 2026-10-28 — 🎉 1,000 Downloads Community Celebration Edition
+
+This milestone release celebrates surpassing **1,000 active downloads** on HACS in just over a week! A heartfelt thank you to our vibrant open-source community, early contributors, and everyone who filed issues, tested hardware edge cases, and helped refine the integration.
+
+**PR's:** @Syax89 @mzhur  
+**Issues:** @cyranius669 @Mrgrafcox @ThatCKx @yagoid @lvbubi @ndesgranges  
+*(Special thanks also to everyone in the Home Assistant community who submitted anonymous diagnostic traces and starred the repository!)*
+
+### ☕ Support the Project
+
+If this integration has added value to your smart home setup, consider buying me a coffee to support continued development and maintenance:
+
+[![Support on Ko-fi](https://img.shields.io/badge/Support%20on-Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/stevene_)
+
+### 🌟 What's New & Hardened in v3.0.0
+
+- **LIVE MQTT DEVICE REGISTRY ENRICHMENT & GENERIC PLACEHOLDER SANITIZATION (`discovery.py`, `tv/state.py`, `entity.py`, `__init__.py`)**:
+  - Sanitized generic UPnP `<manufacturer>SmartTV</manufacturer>` placeholders using brand codes (`BRAND_MAP`) parsed from SSDP model descriptions.
+  - Dynamically bound `device_info` in `HisenseVidaaEntity` to live telemetry attributes (`model_name`, `manufacturer`, `firmware_version`), falling back to config entry values.
+  - Implemented real-time `async_update_device` callback on incoming `getdeviceinfo` and `gettvinfo` MQTT telemetry, with clean unload unregistration.
+  - Updated device registry lookup to use modern `async_get_device_by_identifier` with backwards-compatible fallback, preventing deprecation warnings in HA 2025.1+.
+- **DYNAMIC MDI APP & SOURCE ICON BRANDING (`media_player.py`)**:
+  - Added dynamic `icon` property to `HisenseVidaaMediaPlayer` resolving active sources and Smart TV streaming applications (Netflix, YouTube, Prime Video, Disney+, Plex, Spotify, Apple TV, Browser, HDMI ports, Live TV, AV) to intuitive MDI icons.
+- **MULTI-BRAND VIDAA OS PROTOCOL FOUNDATION (`crypto.py`, `client.py`, `flow_discovery.py`)**:
+  - Parameterized the brand identifier across pairing handshake, dynamic username generation, client ID formatting, and password hashing (`"his"`, `"tos"`, `"loe"`, `"sch"`, `"aka"`, `"bek"`, `"tel"`, `"bus"`, `"vic"`), laying the groundwork for the upcoming universal VIDAA integration rebrand.
+- **INTEGRATION QUALITY SCALE (GOLD TIER) HARDENING & EXPANDED DOCUMENTATION**:
+  - Implemented `async_remove_config_entry_device` in `__init__.py` for stale device cleanup (`stale-devices`).
+  - Added formal tracking file `quality_scale.yaml` documenting adherence across Bronze, Silver, and Gold IQS rules.
+  - Pinned `manifest.json` to Bronze pending official staged review by Home Assistant Core reviewers.
+  - Expanded documentation across `docs/README.md`, `docs/parameters.md` (local push architecture, supported entities, known limitations), and `docs/services_and_automations.md` (real-world automation recipes for cinema mode, gaming mode sync, doorbell toast alerts, and late-night audio guard).
+- **TEST SUITE EXPANSION**:
+  - Expanded unit test suite to **221 tests passing** across stale device removal, dynamic source icons, brand credentials derivation, deprecation-free device registry enrichment, and telemetry parsing.
+
+## [2.11.1] - 2026-10-21
+
+- **MASK SENSITIVE MQTT TOKENS IN DEBUG LOGS (`protocol/dispatcher.py`, `protocol/auth.py`, `protocol/pairing.py`)**:
+  - Implemented `mask_sensitive_payload` and `mask_sensitive_data` to ensure `accesstoken`, `refreshtoken`, `access_token`, `refresh_token`, passwords, and secrets are sanitized (`***`) in Home Assistant debug logs when debug logging is active.
+  - Masked incoming MQTT payload logging in `dispatch_incoming_mqtt_message` on token topics (`tokenissuance`, `gettoken`), while preserving non-sensitive diagnostic integers (`accesstoken_duration_day`, `accesstoken_time`).
+  - Added fallback redaction (`[payload masked]`) for non-JSON or malformed payload strings on token topics, and regex-based fallback for broken JSON.
+  - Masked token payload debug logging in `perform_token_refresh` standalone refresh client (`on_token_message`).
+  - Masked PIN response payloads and exception error strings in `protocol/pairing.py`.
+- **HOME ASSISTANT DIAGNOSTICS WIRE-KEY REDACTION (`diagnostics.py`)**:
+  - Added wire-format payload keys `"accesstoken"` and `"refreshtoken"` to `TO_REDACT` in `diagnostics.py` to ensure diagnostics downloads redact tokens across all key naming variations.
+- **CLI DIAGNOSTIC TOOL REDACTION SAFEGUARDS (`test_client.py`)**:
+  - Masked stdout token printing in `test_client.py` (`*** (valid X days)`) to prevent accidental token exposure when users paste terminal troubleshooting outputs into public GitHub issues.
+- **AUTOMATED SENSITIVE DATA LOGGING TEST SUITE (`tests/test_dispatcher.py`, `tests/test_diagnostics.py`)**:
+  - Added comprehensive unit tests with `pytest` `caplog` fixture verifying that debug logs never leak raw access or refresh tokens across dispatch, refresh, and diagnostics platforms, expanding test suite to 215 tests.
+
+## [2.11.0] - 2026-10-20
+
+- **AUTOMATED PERIODIC & WAKE-TRANSITION CLOCK DRIFT TRACKING (`__init__.py`)**:
+  - Registered a 2-hour periodic background poller (`async_track_time_interval`) and wake-transition hook on `client.register_state_callback` to continuously synchronize `sensor.<tv>_clock_drift` and keep `client.clock_offset` current without manual intervention.
+- **ISOLATED IOT NETWORK NTP & DNS SINKHOLE SPECIFICATION (`docs/network_requirements.md`)**:
+  - Documented DNS sinkhole null-route behavior (`0.0.0.0`) in AdGuard Home / Pi-hole causing silent NTP DNAT failure, providing exact `$dnsrewrite` and DNS override rules.
+- **CODEBASE MODERNIZATION & CLEAN CODE IDENTIFIER REFACTORING**:
+  - Standardized variable, function, and parameter names across the entire integration to adhere to clean code standards. Replaced abbreviated or implementation-leaking identifiers with clear, intent-revealing names (`callback` instead of `cb`, `current_timestamp` instead of `ts`, `mac_address` instead of `mac`, `picture_supported` instead of `pic_supported`, `client_instance` instead of `c`).
+  - Preserved backward-compatible keyword argument signatures where necessary to ensure uninterrupted compatibility with external call sites and existing tests.
+- **STRICT TYPE SPECIFICATION & `Any` ELIMINATION**:
+  - Tightened type annotations across TV state parsers (`apply_state_update`, `apply_device_info_update`, `apply_volume_update`, `apply_picture_update`, `apply_sound_update`), settings managers, navigation handlers, and media playback routines, replacing generic `Any` types with explicit `HisenseTvClient` types under non-runtime `TYPE_CHECKING` guards.
+  - Hardened auto-discovery signatures (`parse_ssdp_discovery`, `parse_zeroconf_discovery`, `_async_handle_discovery`) to use typed `DiscoveredTvInfo`, `SsdpServiceInfo`, and `ZeroconfServiceInfo` definitions.
+  - Resolved generic types across entity platform constructors (`switch.py`, `entity.py`) and config flow future completion callbacks.
+- **TEST SUITE MODULARIZATION & ARCHITECTURE REORGANIZATION**:
+  - Decomposed monolithic configuration flow tests into modular, single-responsibility test files (`test_options_flow.py`, `test_reauth_flow.py`, `test_dispatcher.py`, `test_pairing.py`).
+  - Configured explicit `testpaths = ["tests"]` in `pyproject.toml` to optimize test runner discovery and avoid traversing build or virtualenv directories.
+  - Expanded unit test coverage with dedicated tests for standalone descriptor parsing and service helpers (`test_upnp_desc_parsers`, `test_services_helpers`), reaching 208 passing tests.
+- **SERVICE TARGET RESOLUTION & SCHEMA MODULARIZATION (`services.py`, `services_target.py`)**:
+  - Extracted target resolution algorithms, entity/device/area/floor registry lookups, schema selector generators, and key sequence parsers out of `services.py` into a dedicated `services_target.py` helper module.
+  - Streamlined `services.py` from 581 lines down to 386 lines, focusing the primary file on declarative Home Assistant service registration and execution logic while preserving 100% backward compatibility for all re-exported symbols.
+- **UPNP XML DESCRIPTOR DECOUPLING (`tv/fingerprint.py`, `tv/upnp_desc.py`)**:
+  - Decoupled XML traversal from network socket and HTTP I/O by establishing `tv/upnp_desc.py`.
+  - Introduced dedicated, isolated parsers for UPnP MediaRenderer descriptors (`parse_upnp_renderer_descriptor`), friendly names, model descriptions, and SOAP responses (`parse_soap_volume_response`, `parse_soap_mute_response`, `parse_soap_transport_info_response`), enabling zero-mock unit testing of XML payloads.
+- **CLI DIAGNOSTIC & DEBUG TOOLING ALIGNMENT**:
+  - Validated and updated standalone CLI test scripts (`test_client.py`, `debug_tv.py`) to ensure seamless alignment with updated package imports and clean type hints.
+- **MULTI-KEY SEQUENCE / MACRO SERVICE (`services.py`, `services.yaml`)**:
+  - Added `hisense_vidaa.send_key_sequence` allowing multi-step key navigation sequences (e.g. `["home", "down", "ok"]` or `"home, down, ok"`) with customizable inter-key delays and schema validation.
+- **DIRECT NUMERICAL CHANNEL TUNING SERVICE (`services.py`, `services.yaml`)**:
+  - Added `hisense_vidaa.change_channel` to tune directly to numeric Live TV channels (e.g. `701`, `10`) by sequentially dispatching digit keys (`KEY_7`, `KEY_0`, `KEY_1`) with optional confirmation keypress (`KEY_OK`).
+- **TRANSIENT PLAYBACK STATE DEBOUNCE (`media_player.py`, `options_flow.py`)**:
+  - Added configurable settle window (`playback_debounce`, default 0.5s) to filter out transient sub-second state flickers (e.g. app launch, buffering) from firing false automations.
+- **REORGANIZED CATEGORIZED OPTIONS FLOW (`options_flow.py`)**:
+  - Restructured Options Flow into 4 intuitive categories: *Power & Network*, *Playback & Sources*, *Entities & Remote Controls*, and *Connection & Security*.
+  - Added slider number selector for playback debounce and backward-compatible aliases for all prior menu steps.
+- **100% LOCALIZATION PARITY ACROSS ALL SUPPORTED LANGUAGES (`translations/*`)**:
+  - Added complete service and options translations across all 7 supported languages: English (`en`), German (`de`), Spanish (`es`), French (`fr`), Italian (`it`), Portuguese (`pt`), and Brazilian Portuguese (`pt-BR`).
+- **DIAGNOSTICS REDACTION EXPANSION (`diagnostics.py`)**:
+  - Expanded sensitive data masking in `diagnostics.py` to audit and sanitize all certificate paths, key paths, P12 passwords, and tokens.
+- **UPNP / DLNA LAN CONTROL SUBSYSTEM (`protocol/upnp.py`, `client.py`)**:
+  - Implemented an asynchronous UPnP LAN Control and DLNA client (`HisenseUpnpClient`) supporting port `38400` (and `18400` fallback).
+  - Integrated `RenderingControl:1` SOAP actions for instantaneous, unauthenticated volume and mute control (`GetVolume`, `SetVolume`, `GetMute`, `SetMute`) directly on the hardware amplifier without MQTT/TLS overhead.
+  - Integrated `AVTransport:1` SOAP actions for real-time media playback state tracking (`GetTransportInfo`, `Play`, `Pause`, `Stop`).
+  - Integrated proprietary `LanControlInfo:1` service (`GetLanControlInfo`, `SetLanControlInfo`) reverse-engineered from companion mobile applications.
+  - Added non-blocking async feature probing (`async_probe()`) to detect UPnP service capabilities without stalling Home Assistant's event loop.
+  - Integrated UPnP service probing and hardware clock drift analysis directly into core CLI diagnostic tools (`test_client.py upnp` and `debug_tv.py --probe-upnp`) and added dedicated unit test suite (`tests/test_upnp.py`).
+- **ZERO-COST CLOCK DRIFT & TIMESTAMP SYNCHRONIZATION (`protocol/upnp.py`, `sensors_diagnostic.py`)**:
+  - Added real-time clock drift detection by parsing RFC 7231 `Date:` HTTP headers returned in UPnP responses.
+  - Automatically calculates host-to-TV clock offset without issuing external NTP queries, ensuring reliable dynamic MQTT username hashing across networks.
+  - Hardened `HisenseVidaaClockDriftSensor` against `None` initial clock offset states to prevent `TypeError` exceptions during early initialization.
+  - Added comprehensive isolated IoT VLAN NTP DNAT redirect rules (OpenWrt UCI, nftables, iptables, OPNsense) in `docs/network_requirements.md` to mitigate clock drift on televisions without battery-backed hardware RTCs.
+- **HOME ASSISTANT DEBUGGING & DIAGNOSTIC ENTITIES REFERENCE (`docs/parameters.md`)**:
+  - Documented all built-in diagnostic and maintenance entities (`button.sync_clock`, `button.force_reconnect`, `button.trigger_re_pairing`, `sensor.clock_drift`, `sensor.session_status`, `switch.debug_logging`).
+  - Added step-by-step Home Assistant troubleshooting instructions covering on-the-fly debug toggling, official sanitized diagnostics downloads, repair flows, and core log inspection.
+- **SILVER TIER ACTION EXCEPTION WRAPPING (`services.py`)**:
+  - Wrapped all custom Home Assistant service action handlers (`send_key`, `launch_app`, `set_picture_setting`, `set_sound_setting`, `send_text_input`) in `HomeAssistantError` with descriptive contextual error messages instead of raw socket or connection errors.
+- **COMPREHENSIVE CONFIGURATION & INSTALLATION PARAMETERS REFERENCE (`docs/parameters.md`)**:
+  - Created a dedicated reference document detailing all Options Flow settings (heartbeat/polling intervals, volume stepping, WoL packets and bursts, SSL verify, cert paths) and initial Config Flow setup fields.
+- **EXPANDED TEST SUITE (206 TESTS)**:
+  - Expanded unit test coverage with dedicated UPnP protocol tests, clock drift sensor edge cases, cold-boot signal recovery (`is_signal == 1`), and disconnected media player state handlers, reaching 206 passing tests and establishing a solid 77% test coverage baseline.
+
+### Changed
+
+- **DOCUMENTATION REORGANIZATION & STREAMLINING (`README.md`, `docs/*`)**:
+  - Streamlined root `README.md` to eliminate duplicated CLI diagnostic commands and uninstallation blocks, redirecting users to dedicated guides in `docs/`.
+  - Simplified the Supported TV Generations table to user-friendly model families while preserving cryptographic architecture details in `docs/protocol_architecture.md`.
+  - Added UPnP LAN Control architecture, SOAP endpoints, and multi-brand OEM ecosystem details (Toshiba, Loewe, Schneider, Akai, Beko, etc.) to `docs/protocol_architecture.md`.
+  - Updated port matrix in `docs/network_requirements.md` to document UPnP port `38400` / `18400` LAN controls.
+  - Updated documentation directory index in `docs/README.md`.
+
+## [2.10.6] - 2026-10-11
+
+### Added
+
+- **LAUNCH APP SERVICE OVERRIDES & DEEP LINKING (`services.py`, `services.yaml`, `const.py`)**:
+  - Added optional `app_id`, `app_name`, and `url` parameters to `hisense_vidaa.launch_app` service action (#39, #40).
+  - Enables launching smart TV apps directly by numeric application ID without needing the display name in the app list.
+  - Enables launching YouTube directly with a video deep-link URL (e.g. `url: "https://www.youtube.com/watch?v=..."`).
+  - Added schema validation requiring either `app` or `app_id`.
+  - Added documentation and YAML automation examples in `docs/services_and_automations.md`.
+- **FORCE RE-PAIRING / RE-AUTHENTICATION BUTTON (`button.py`, `icons.json`)**:
+  - Added dedicated diagnostic button `HisenseVidaaTriggerReauthButton` (`button.trigger_reauth` / "Trigger Re-pairing").
+  - Allows manually initiating Home Assistant's native re-authentication and PIN pairing flow directly from the device page without needing an existing error or repair issue.
+- **COMPREHENSIVE TRANSLATIONS PARITY (`translations/*`, `strings.json`)**:
+  - Added entity and service translation entries across all supported languages: English (`en.json`), German (`de.json`), Spanish (`es.json`), French (`fr.json`), Italian (`it.json`), Portuguese (`pt.json`), and Brazilian Portuguese (`pt-BR.json`).
+
+### Fixed
+
+- **ELIMINATED UNWANTED STARTUP PAIRING PIN PROMPTS (`tv/actions.py`, `client.py`, `protocol/connection.py`, `media_player.py`, `remote.py`)**:
+  - Eliminated unwanted physical 4-digit pairing PIN dialogs appearing on-screen during Home Assistant reboots and container restarts.
+  - Removed `actions/gettvstate` from the initial state query burst; on VIDAA OS firmware, publishing `gettvstate` commands the TV to pop up an on-screen pairing PIN challenge on unassociated UI topics, whereas the TV already broadcasts live state automatically upon MQTT connection via `/remoteapp/mobile/broadcast/ui_service/state`.
+  - Added thread-safe 3.0-second debouncing to initial state queries (`query_initial_state`) to prevent broker command flooding.
+  - Removed duplicate redundant initial query calls during `media_player` and `remote` entity addition.
+- **REAUTHENTICATION FLOW MQTT CLIENT COLLISION (`flow_reauth.py`)**:
+  - Disconnected any existing running background client for the target entry before initiating re-authentication pairing.
+  - Prevents twin MQTT clients from colliding under the same Client ID, eliminating connection bounce (`rc: 7`) and PIN validation timeouts.
+- **MQTT v5 REASON CODES 134 & 135 REJECTION HANDLING (`protocol/auth_lifecycle.py`, `protocol/connection.py`, `protocol/pairing.py`, `protocol/ping.py`)**:
+  - Added explicit handling for MQTT v5 Reason Codes `134` (*Bad authentication data*) and `135` (*Not authorized*) returned by modern firmware brokers when stored credentials or refresh tokens are invalidated.
+  - Ensures the broker rejection failure counter correctly increments and triggers Home Assistant's native re-authentication repair flow instead of silently resetting the counter.
+
+## [2.10.5] - 2026-10-03
+
+### Added
+
+- **HOME ASSISTANT BRONZE QUALITY SCALE COMPLIANCE (`quality_scale.yaml`, `manifest.json`)**:
+  - Achieved official Home Assistant Bronze Quality Scale compliance, validated against all tier criteria.
+  - Added `quality_scale: "bronze"` to `manifest.json` and established `quality_scale.yaml` with rule tracking.
+  - Added comprehensive integration removal documentation (`docs/removal.md`).
+
+### Changed
+
+- **MODERN RUNTIME DATA ARCHITECTURE (`__init__.py`, all platform entities)**:
+  - Migrated integration state and client storage from legacy `hass.data[DOMAIN]` dictionary to modern typed `ConfigEntry.runtime_data` (`HisenseVidaaRuntimeData`).
+  - Refactored `media_player`, `remote`, `sensor`, `binary_sensor`, `switch`, `button`, `number`, `select`, `notify`, `diagnostics`, and `services` platforms to access `entry.runtime_data` directly.
+
+### Fixed
+
+- **PROTOCOL & CONNECTION RESILIENCE (`protocol/connection.py`, `protocol/ping.py`, `protocol/auth.py`)**:
+  - Fixed `paho-mqtt` Callback API v1 deprecation warning by explicitly configuring compatible callback API protocols.
+  - Hardened dynamic client connection teardown and cleanup during config entry unloads and reloads.
+  - Improved typing consistency and removed deprecated type aliases across all platform modules.
+
+## [2.10.4] - 2026-10-01
+
+### Fixed
+
+- **HACS RELEASE ASSET PACKAGING (`.github/workflows/release.yml`)**:
+  - Packaged the integration content directly at the root of `hisense_vidaa.zip` rather than nesting the `custom_components/hisense_vidaa/` directory tree (#37).
+  - Resolves Home Assistant reporting `Integration 'hisense_vidaa' not found` after installing or updating through HACS, which unpacks the zip release asset directly into `custom_components/<domain>/`.
+
+## [2.10.3] - 2026-10-01
+
+### Fixed
+
+- **PAIRING & PIN PROMPT RELIABILITY (`flow_discovery.py`, `client.py`)**:
+  - Automatically detected PIN dialog dismissal (`authenticationcodeclose`) and remote pairing slot busy (`authenticationcodetoast`) events, returning immediate retryable user feedback instead of hanging until timeout (#33).
+  - Added support for static PIN pairing sessions without token exchange for models that require PIN entry during connection (#33).
+- **FLOW & LIFECYCLE ROBUSTNESS (`flow_reauth.py`, `__init__.py`, `discovery.py`)**:
+  - Fixed reconfigure flow aborting when selecting an existing entry (#31).
+  - Removed invalid future wrapping on `async_remove` listener registration (#31).
+  - Kept blocking TV timestamp discovery off the Home Assistant async event loop (#31).
+  - Re-armed token expiration watch latch on successful connection and reconnect (#32).
+  - Added connection concurrency lock (`_reconnect_lock`) to eliminate reconnect race conditions (#32).
+  - Preserved original MAC address casing across discovery and config entries (#32).
+  - Subscribed client directly to its own mobile push tree on connect (#32).
+- **HOME ASSISTANT CORE INTEGRATION SURFACE (`services.py`, `repairs.py`, `diagnostics.py`)**:
+  - Expanded custom TV services to resolve targets by Home Assistant Area, Floor, and Label (#34).
+  - Managed repair issue lifecycle properly, clearing issues when resolved and recovering entry from issue ID (#34).
+  - Secured diagnostics export to redact credentials and tokens safely (#34).
+- **PLATFORM BEHAVIOUR & ROBUSTNESS (`media_player.py`, `remote.py`, `tv/media.py`, `notify.py`, `sensors_diagnostic.py`)**:
+  - Made mute command idempotent, avoiding unintended mute state toggling (#35).
+  - Honoured `key_repeat` options when Home Assistant passes default `num_repeats: 1` (#35).
+  - Added key-spelling fallbacks (`sourceName`/`appName` vs snake_case) across diverse VIDAA firmware versions (#35).
+  - Coerced string volume payloads from legacy firmware broadcasts (#35).
+  - Automatically purged disabled notification entities from the entity registry (#35).
+
+### Added
+
+- **MULTI-LANGUAGE LOCALIZATION SUPPORT (`translations/`)**:
+  - Added comprehensive native translation dictionaries with 100% key and placeholder parity for high-adoption Hisense VIDAA markets:
+    - **Italian (`it.json`)**: Full coverage of config flows, options, entity names, diagnostics, and repairs.
+    - **Spanish (`es.json`)**: Spain and Latin America localization.
+    - **German (`de.json`)**: Germany, Austria, and Switzerland localization.
+    - **French (`fr.json`)**: France, Belgium, and Canada localization.
+    - **Portuguese (`pt.json`)**: Portugal European Portuguese localization.
+    - **Brazilian Portuguese (`pt-BR.json`)**: Brazil Portuguese localization.
+
+### Improved
+
+- **CLI TOOLS & DOCUMENTATION (`test_client.py`, `debug_tv.py`, `tv/probe.py`, `docs/`)**:
+  - Added `--profile middle` CLI option and ensured profile passthrough in diagnostic reports (#36).
+  - Gated MQTT `rc=5` rejection warning so offline TVs are not falsely diagnosed as rejected (#36).
+  - Provided clear error instructions when test stubs cannot load outside Home Assistant (#36).
+  - Corrected documentation strings, service examples, and topic prefixes across all docs (#36).
+
+## [2.10.2] - 2026-10-01
+
+### Fixed
+
+- **LEGACY PKCS#12 EXTRACTION EXCEPTION HANDLING (`protocol/certs.py`)**:
+  - Safely caught decryption/loading errors when unpacking `.p12` archives on OpenSSL 3.x systems that lack the legacy cipher provider. Extraction failures now log clear guidance rather than passing raw binary data to the SSL module and raising unhandled `[SSL] PEM lib` exceptions.
+
+### Improved
+
+- **CLIENT CERTIFICATE DIAGNOSTICS & MISLEADING REJECTION WARNINGS (`test_client.py`, `probe.py`)**:
+  - `test_client.py` (`ping`, `test-ssl`) and diagnostic probe reports now explicitly state whether a client certificate was loaded and presented during the TLS handshake.
+  - When all authentication profiles fail with `rc=5` (Not Authorized) and no client certificate was presented, diagnostic outputs explicitly flag that the TV's on-screen warning (*"Your TV model is no longer compatible with the current version of our mobile app"*) is triggered by unauthenticated connections rather than incompatible firmware (Issue #30).
+
+## [2.10.1] - 2026-10-01
+
+### Added
+
+- **RENEW TOKENS IN STANDBY OPTION (`refresh_in_standby`, Options → General & Power, default off)**:
+  - TVs that keep their MQTT broker up when switched off (fake sleep, e.g. Fast Power On) answer `gettoken` in standby as well; verified on a 55E8GE (V0000.06.29X.P0813). With the option on, the proactive and periodic refresh no longer wait for the TV to be turned on, so the 2-day access token is renewed and the pairing survives Home Assistant restarts even if the TV is not used for days.
+  - In standby the refresh is attempted only while the current access token is still valid: a failed refresh restores the connection with that token, and an expired one could not be re-established, so the open connection is then left alone until the TV wakes.
+
+## [2.10.0] - 2026-09-29
+
+### Added
+
+- **HOME ASSISTANT INTEGRATION QUALITY SCALE IMPROVEMENTS (DECLARED TIER: BRONZE)**:
+  - **Structured Service Response Data (`SupportsResponse.OPTIONAL`)**: Registered all custom TV services (`send_key`, `launch_app`, `set_picture_setting`, `set_sound_setting`, `send_text_input`) with `supports_response=SupportsResponse.OPTIONAL`, returning detailed execution metadata and target IP arrays to Home Assistant scripts and automations.
+  - **Dynamic Options Lifecycle**: Streamlined config entry update listener with options filtering to prevent unnecessary reloads.
+- **MODULAR ARCHITECTURAL DECOMPOSITION (<300 LINES PER MODULE)**:
+  - **Config Flow Decomposition (`flow_helpers.py`, `flow_certs.py`, `flow_discovery.py`, `flow_reauth.py`)**: Split monolithic `config_flow.py` (580 lines -> 268 lines) into dedicated discovery, certificate handling, and re-authentication mixins.
+  - **Client Connection Lifecycle (`protocol/connection.py`)**: Extracted MQTT connection loops, keepalive management, async queries, and socket error recovery into `ConnectionManagerMixin` (`client.py` reduced from 842 lines -> 388 lines, -53.9%).
+  - **TV Settings & Picture/Sound Actions (`tv/settings.py`)**: Moved picture calibration sliders and sound mode get/set commands into `TvSettingsActionsMixin` (293 lines).
+  - **Diagnostic Sensors Platform (`sensors_diagnostic.py`)**: Extracted secondary diagnostic entities (`SessionStatusSensor`, `AuthProfileSensor`, `ReportedNameSensor`, `AudioOutputSensor`) into `sensors_diagnostic.py` (222 lines), reducing `sensor.py` from 409 lines -> 235 lines.
+  - **Media Player Broadcast State Parsing (`tv/media.py`)**: Modularized incoming broadcast telemetry, volume, and input handlers into pure functional parsers (`parse_media_state_broadcast`, `parse_volume_broadcast`, `parse_sourcelist_data`, `parse_applist_data`).
+
+## [2.9.6] - 2026-09-29
+
+### Fixed
+
+- **HASSFEST TRANSLATION SCHEMA MUTUAL EXCLUSION (`strings.json`, `translations/en.json`)**:
+  - Resolved Hassfest validation error (`two or more values in the same group of exclusion 'fixable' at 'issues.auth_token_invalidated.<fixable>'`) by merging the top-level explanation into `fix_flow.step.confirm.description` in accordance with Home Assistant core Repairs schema standards.
+
+### Added
+
+- **HOME ASSISTANT INTEGRATION QUALITY SCALE IMPROVEMENTS**:
+  - **`PARALLEL_UPDATES = 0`**: Declared across all 9 platform modules (`media_player.py`, `remote.py`, `sensor.py`, `binary_sensor.py`, `switch.py`, `select.py`, `number.py`, `button.py`, `notify.py`) to properly communicate local push concurrency semantics to Home Assistant Core.
+  - **Entity Translation Standardization**: Migrated all remaining entities from hardcoded `_attr_name` to official `_attr_translation_key` across `binary_sensor`, `select`, `number`, `switch`, `notify`, and `remote` platforms with 100% key parity between `strings.json` and `translations/en.json`.
+  - **Complete MDI Icon Mapping (`icons.json`)**: Fully expanded `icons.json` covering all entity translation keys, binary sensor states, select options, and custom services.
+  - **PEP 561 Type Marker (`py.typed`)**: Added package type marker for strict static type checking.
+  - **Quality Scale Declaration**: Formally declared `"quality_scale": "bronze"` in `manifest.json` adhering to Home Assistant Integration Quality Scale progression.
+
+## [2.9.5] - 2026-09-28
+
+### Fixed
+
+- **BROKER-INVALIDATED TOKEN DETECTION & AUTO-ESCALATION (`client.py`)**:
+  - Added `MAX_BROKER_REJECTION_ATTEMPTS = 3` threshold. When the TV broker invalidates its token store out-of-band (firmware update, hard power-cut, or deep energy-saving standby after HDMI sources sleep), both the `access_token` and `refresh_token` are simultaneously rejected (`rc: 4`). Previously, `_dispatch_auth_failed()` was gated strictly on timestamp-based `is_token_expired()`, meaning broker-invalidated tokens still within their 30-day validity window silently retried forever with exponential backoff without notifying the user. The integration now treats 3 consecutive broker rejections as permanent credential invalidation and triggers the re-authentication flow.
+- **ZEROCONF INSTANCE DEPRECATION WARNING (`tv/fingerprint.py`)**:
+  - Removed direct `Zeroconf()` instantiation that caused Home Assistant deprecation warnings (`Detected that custom integration 'hisense_vidaa' attempted to create another Zeroconf instance`). Callers in Home Assistant should pass the shared Zeroconf instance; mDNS fingerprinting gracefully skips when `zc=None` while UPnP descriptor parsing continues to capture model, MAC, and firmware metadata.
+
+### Added
+
+- **PERSISTENT HA REPAIRS DASHBOARD CARD (`repairs.py`, `strings.json`, `__init__.py`)**:
+  - Introduced `auth_token_invalidated` repair issue flow. When the broker invalidates credentials, Home Assistant creates a persistent card in the Repairs panel (`Settings → System → Repairs`) explaining why tokens were invalidated and providing a 1-click prompt to display a PIN on the TV and re-pair.
+- **RECOMMENDED TV STANDBY & POWER SETTINGS GUIDANCE (`README.md`, `docs/network_requirements.md`, `GEMINI.md`)**:
+  - Documented essential TV power settings (`Fast Power On = ON`, `Auto Standby with No Signal = OFF`, `Auto Sleep = OFF`) to prevent deep energy-conservation shutdowns when connected HDMI devices (Chromecast with Google TV, Apple TV, gaming consoles) sleep.
+
+## [2.9.4] - 2026-09-27
+
+### Fixed
+
+- **WILDCARD SUBACK 128 SUBSCRIPTION REJECTION FIX (Issue #28)**:
+  - In `protocol/auth.py` (`perform_token_refresh`), replaced the wildcard `#` subscription with explicit subscriptions to `platform_service/data/tokenissuance` and `platform_service/data/gettoken`. Resolves failed token refreshes on modern VIDAA TV firmwares (e.g. 65Q75QE, 65U6KE) that deny wildcard subscriptions with `SUBACK 128`.
+- **PREVENT ON/OFF FLAPPING LOOP AFTER SUCCESSFUL REFRESH (Issue #28)**:
+  - In `__init__.py`, updated `update_listener` to check whether `entry.options` actually changed before reloading the integration. Persisting refreshed tokens in `entry.data` no longer triggers entry reload, preventing duplicate MQTT client sessions from fighting over the same `client_id` and flapping every 2 seconds.
+  - Removed redundant `connect_and_run()` call in `_refresh_token_and_update_creds()` since `refresh_tokens()` already handles reconnection.
+- **STRANDED CONNECTION AFTER FAILED TOKEN REFRESH (PR #27)**:
+  - `refresh_tokens()` now restores the main MQTT connection with the current access token when the refresh fails (a TV in standby never answers `gettoken`); previously the entry stayed loaded but disconnected until it was reloaded.
+  - `_proactive_token_refresh()` waits for the retained state broadcast and skips the refresh while the TV reports standby (`fake_sleep_0`); a periodic token watch retries the near-expiry refresh once the TV is awake, with exponential backoff.
+  - On `rc: 4/5` the refresh retries now back off (1 → 30 min) and a delayed reconnect is scheduled, since paho's loop is stopped on rejection and nothing retried.
+- **FALSE `on` STATE WHILE IN STANDBY (PR #27)**:
+  - `media_player` no longer forces `is_on = True` on connect or on `volumechange` / `sourcelist` / `applist` messages; TVs with `fake_sleep` keep the broker up and publish these in standby, which made the entity report `on` after a restart and turned `turn_off` (`KEY_POWER` toggle) into power-on. Power state is derived from state messages only.
+
+## [2.9.3] - 2026-09-21
+
+### Fixed
+
+- **LIVE TV SOURCE STATE PARSING & INPUT CYCLING**:
+  - Fixed `client.current_source` not updating to `"TV"` when receiving `statetype: "livetv"` broadcasts without a `sourcename` key, which previously caused remote `input` cycling to calculate the next source from stale previous states and loop on Live TV.
+  - Filtered `get_next_cycled_source` candidates to physical hardware inputs (`HDMI1`, `HDMI2`, `HDMI3`, `AV`, `TV`), preventing input cycling from stalling on virtual app entries (such as `VIDAA tv` app ID `284`).
+  - Added Live TV alias matching (`tv`, `live tv`, `livetv`, `dtv`, `antenna`) to cleanly wrap cycling around from `TV` back to `HDMI1`.
+  - Ensured both `sourceid` and `sourcename` are populated in `actions/changesource` MQTT payloads when switching inputs.
+- **CONFIG FLOW MQTT CLIENT LEAK & 30s RECONNECT FLAPPING (Issue #25)**:
+  - Cleanly disconnects the pairing flow MQTT client in the executor before creating the configuration entry in `async_step_options`, eliminating duplicate client sessions with identical `client_id`s that caused 30-second disconnect/reconnect flapping until HA restart.
+  - Cleanly disconnects the flow client before entry reload in `_async_finish_reauth`.
+  - Implemented `@callback def async_remove(self)` in `HisenseVidaaConfigFlow` to stop background client threads when a pairing flow is aborted, dismissed, or closed.
+
+### Added
+
+- **VIDAA 2024 APK KEYSTORE AUTO-DISCOVERY (`El.p12`) (Issue #6)**:
+  - Added `El.p12` and `el.p12` to PKCS#12 bundle candidate lists for `modern`, `middle`, and `auto` profiles, allowing raw keystores extracted directly from official VIDAA Android APKs (`res/El.p12`) to be auto-discovered and unpacked to PEM without manual renaming.
+  - Documented client certificate identity validation (`CN=VidaaAppAndroidV01`) on 2024+ VIDAA firmware (`p20.09.6030...`) and guidance for resolving `rc: 5` (Not Authorized) pairing rejections.
+
+## [2.9.2] - 2026-09-18
+
+### Fixed
+
+- **TOKEN REFRESH RESILIENCE & STANDBY REAUTH SUPPRESSION**:
+  - Suppressed spurious `auth_failed` callback and HA reauth prompts when the TV's internal MQTT broker rejects connections with `rc: 4` or `rc: 5` while entering/in standby (`fake_sleep_0`), preserving valid 30-day `refresh_token` credentials for automatic reconnection upon TV wake.
+  - Eliminated race condition in `_on_connect` where in-flight or throttled token refresh attempts prematurely dispatched `_dispatch_auth_failed()`.
+  - Only triggers Home Assistant interactive reauth if the `refresh_token` is completely missing or expired (`>30 days`).
+- **PROACTIVE TOKEN RENEWAL**:
+  - Added `_proactive_token_refresh` to renew tokens in the background when connected and the 2-day `access_token` has `<12 hours` remaining, preventing token expiration during overnight standby.
+- **TOKEN LIFESPAN DIAGNOSTICS**:
+  - Added `access_token_expires_at` and `refresh_token_expires_at` ISO datetime attributes to `sensor.{tv}_session_status`.
+
+## [2.9.1] - 2026-09-17
+
+### Added
+
+- **OPT-IN PICTURE, SOUND & AUDIO-ONLY CONTROLS**: Picture calibration sliders (`number.{tv}_backlight`, `number.{tv}_brightness`, `number.{tv}_contrast`), mode selects (`select.{tv}_picture_mode`, `select.{tv}_sound_mode`), and screen-off switch (`switch.{tv}_audio_only`) are now opt-in via **Configure -> 🎨 Picture & Sound Controls** (default: disabled). Prevents phantom/unsupported controls from cluttering Home Assistant on TVs lacking MQTT picture/sound/screen-off menu support while keeping all feature code 100% available for supported models.
+- **AUTOMATIC & ON-DEMAND CAPABILITY PROBING**:
+  - **Setup Auto-Probe (`config_flow.py`)**: Automatically probes live TV picture and sound menus over MQTT immediately after pairing/PIN verification, dynamically setting the default options checkboxes for supported hardware.
+  - **On-Demand Diagnostic Button (`button.{tv}_probe_capabilities`)**: Pressing the button queries the TV's MQTT broker and automatically enables picture/sound options if the TV responds with supported menu schemas.
+- **AUTOMATIC ENTITY REGISTRY CLEANUP**: Disabled picture, sound, and audio-only entities are automatically purged from Home Assistant's Entity Registry on setup/options update rather than lingering as unavailable or orphaned entities.
+- **DYNAMIC SOUND MODE FEATURE DISCOVERY**: `MediaPlayerEntityFeature.SELECT_SOUND_MODE` is dynamically registered only when the TV hardware exposes active sound mode presets via MQTT. If a TV model does not report sound mode capabilities, the sound mode selector is cleanly omitted from the Home Assistant media player card and entity attributes (`sound_mode_list = None`).
+- **NATIVE ASYNC ACTION PLATFORM METHODS**: Refactored all media player platform actions (`async_turn_on`, `async_turn_off`, `async_set_volume_level`, `async_select_source`, `async_select_sound_mode`, `async_play_media`, etc.) to standard Home Assistant asynchronous methods.
+- **AUTOMATED CONFIG ENTRY TOKEN PERSISTENCE**: Registered `token_refreshed` callback handler in `__init__.py` to persist rotated access tokens back into `config_entry.data`.
+
+### Fixed
+
+- **CALLBACK DISPATCH SIGNATURES (`tv/callbacks.py`)**: Fixed `auth_failed` and `token_refreshed` callback invocations to pass the active client instance (`self`), aligning callback signatures across the lifecycle.
+- **VOLUME & MUTE PAYLOAD PARSING (`tv/state.py`)**: Added strict `volume_type in (2, "2")` guards when evaluating mute status, preventing external ARC soundbar broadcasts (`volume_type: 1`) from overriding `client.muted`.
+- **ENTITY AVAILABILITY MATRIX**: Refined entity availability matrix across base entities (`entity.py`), diagnostic sensors (`sensor.py`), and interactive controls (`select.py`, `number.py`, `switch.py`).
+- **NON-BLOCKING DISCOVERY PROBING (`config_flow.py`)**: Offloaded SSDP and Zeroconf device probing to background executor jobs (`hass.async_add_executor_job`) to eliminate event loop blocking during device setup.
+- **REPAIRS & SERVICE TARGETING**: Fixed certificate resolution check in `repairs.py` (`check_certs_exist`) and modernized `services.py` with standard `entity_id` and `device_id` target resolution.
+- **DIAGNOSTICS ATTRIBUTE RESOLUTION**: Corrected diagnostic payload properties in `diagnostics.py` to match refactored client state attributes (`current_source` and `state`).
+
+## [2.9.0] - 2026-09-17
+
+### Added
+
+- **PROTOCOL & TV SUBPACKAGE ARCHITECTURE**: Refactored internal module structure into two dedicated subpackages:
+  - `protocol/` — `auth.py` (TLS setup, token refresh), `certs.py` (certificate resolution), `dispatcher.py` (MQTT topic dispatch), `pairing.py` (PIN challenge flow), `topics.py` (topic path builders), `wol.py` (Wake-on-LAN).
+  - `tv/` — `actions.py` (command senders), `navigation.py` (source/app cycling), `probe.py` (capability probing), `settings.py` (picture/sound menu models), `state.py` (state attribute updaters).
+- **BASE ENTITY CLASS (`entity.py`)**: All 9 entity platforms now inherit from a single `HisenseVidaaEntity` base class, eliminating duplicated `device_info`, availability, and name scaffolding.
+- **SWITCH PLATFORM**: Added `switch.{tv}_audio_only` (idempotent screen-off audio control) and `switch.{tv}_debug_logging` (dynamic verbose logging toggle without HA restart).
+- **76 AUTOMATED TESTS**: Expanded test suite to 76 passing unit tests covering the full refactored module structure.
+
+### Fixed
+
+- **CERTIFICATE RESOLUTION CALL-SITE MISMATCH**: `resolve_certificates` signature changed from `(certfile, keyfile)` to `(auth_profile, certfile, keyfile)` during refactor — both call sites in `client.py` (`__init__` and `validate_certificates`) were still passing positional args, causing `ssl.SSLError: [SSL] PEM lib` on every startup and triggering the rapid connect/disconnect loop in entity activity logs.
+- **STALE CLIENT ATTRIBUTE NAMES**: Several entity platforms still referenced old attribute names removed or renamed during the `tv/state.py` refactor:
+  - `client.channel_name` → `client.current_channel` (`media_player.py`, `binary_sensor.py`)
+  - `client.program_title` → `client.current_program` (`media_player.py`, `binary_sensor.py`)
+  - `client.program_detail`, `client.program_start`, `client.program_end` — removed entirely from client state model.
+  - `client.is_on` (boolean) → `client.state not in ("off", "")` (`binary_sensor.py`)
+- **ENTITY ACTIVITY LOG LOOP**: The root cause of the rapid entity state-change loop was the `ssl.SSLError` crash on every setup attempt — each failure triggered an immediate reconnect cycle, re-firing all MQTT subscription bursts (sourceswitch, applist, sourcelist) in the activity log. Fixed by resolving all three call-site and attribute mismatches above.
+
+## [2.8.6] - 2026-09-17
+
+### Added
+
+- **4-TIER AUTHENTICATION MATRIX & PROTOCOL FALLBACK CASCADE (Issues #6, #22)**:
+  - Added support for VIDAA Middle tier (`middle`: XOR masked timestamp + Standard salt `h*i&s%e!r^v0i1c9` for transport protocol $3000 \le v < 3290$).
+  - Added multi-port UPnP descriptor detection (supporting both standard port `38400` and alternative port `18400`) for automatically reading `transport_protocol` from `rendererdevicedesc.xml`.
+  - Implemented intelligent pairing auth cascade in `async_start_auth()` that prioritizes candidate profiles (`[modern, middle, remotenow]`, `[middle, modern, remotenow]`, or `[remotenow, middle, modern]`) based on detected transport protocol and automatically cascades through fallback profiles on `rc: 5` / `rc: 4` rejection.
+  - Added `middle_dynamic` probe testing to `probe_tv_auth_methods()` and updated pre-formatted GitHub issue diagnostics tables in `probe.py`.
+  - Added `VIDAA 1.5 / Middle (3000–3285)` selector option in config flow, reconfigure flow, and localizations.
+
+### Fixed
+
+- **MQTT RC 4/5 LOOP HALT & THREAD-STORM PREVENTION (Issues #6, #22)**:
+  - Immediately stop paho-mqtt auto-reconnect background loop on `rc=4` / `rc=5` (not authorized / invalid credentials) before processing authentication futures and callbacks to prevent runaway reconnect thread storms and broker throttling during pairing failures or expired tokens.
+  - Added thread lock and `ensure_connected(min_interval=5.0)` rate-limiting to throttle connection attempts from media player and remote entity commands.
+  - Properly clean up active MQTT background loops and event handlers before instantiating new client instances in `connect_and_run()`.
+  - Removed duplicate unthrottled reconnect logic from token refresh failure paths.
+- **PAIRING SESSION COLLISION & PIN POPUP STORM PREVENTION**:
+  - In `config_flow.py`, proactively disconnect and shut down running background clients prior to launching the pairing handshake, preventing identical Client ID session ping-pong collisions (`rc: 7`) and repeated TV PIN modals.
+  - Stopped paho-mqtt auto-reconnect loops on pairing clients during in-flight PIN verification.
+- **PROACTIVE TOKEN REFRESH & STARTUP PIN SUPPRESSION**:
+  - `check_and_refresh_token()` now avoids proactive token refresh on startup whenever the access token is valid (`time_remaining > 0`), preventing unwanted TV pairing dialogs while watching TV.
+  - Removed automatic `actions/picturesetting` and `actions/soundsetting` menu queries from initial connection sequence to avoid prompting protected engineering menu authorization modals on boot.
+- **VERSIONED CERTIFICATE RESOLUTION (Issues #6, #21)**:
+  - Extended certificate resolver to recognize versioned certificate bundles (`vidaa_client_v01.pem`/`.crt`/`.key`, `vidaa_client_v02.pem`/`.key`).
+  - Added automatic matching key resolution alongside explicit or discovered certificate files.
+- **AUDIO OUTPUT SELECTION STABILITY**:
+  - Filtered volume update handler in `select.py` and `media_player.py` to only process master volume (`0`) and ARC (`1`) channels, preventing mute broadcast packets (`volume_type: 2`) from momentarily toggling audio output selection to `Headphone / Bluetooth`.
+- **BASE ENTITY REFACTORING & CODE DEDUPLICATION**:
+  - Extracted common base class `HisenseVidaaEntity` in [`entity.py`](custom_components/hisense_vidaa/entity.py), standardizing `device_info` registration, MAC address formatting, connection status availability, and `_attr_has_entity_name = True` across all 8 entity platforms (`binary_sensor`, `button`, `media_player`, `notify`, `number`, `remote`, `select`, `sensor`).
+- **SWITCH PLATFORM & IDEMPOTENT AUDIO-ONLY (SCREEN-OFF) CONTROLS**:
+  - Added `switch.{tv}_audio_only` entity implementing idempotent display screen-off control (`KEY_INFO -> KEY_AUDIO` sequence) allowing users to turn off the TV display panel without disrupting audio playback.
+  - Added `switch.{tv}_debug_logging` diagnostic switch allowing users to toggle verbose debug logging on/off dynamically from the UI without restarting Home Assistant.
+- **IN-USE SENSOR & TRANSIENT LIVE TV METADATA RETENTION**:
+  - Added `binary_sensor.{tv}_in_use` (`BinarySensorDeviceClass.RUNNING`) reflecting genuine active TV usage with rich broadcast metadata.
+  - Preserved transient `livetv` broadcast metadata (`channel_name`, `channel_number`, `program_title`, `program_detail`, `media_series_title`) on media player and sensors.
+  - Added backward-compatible `urlType: 37` app launch payloads for older VIDAA firmware compatibility.
+- **EXPANDED TEST COVERAGE**:
+  - Added unit test suite [`tests/test_services.py`](tests/test_services.py) covering all custom integration services (`send_key`, `launch_app`, `set_picture_setting`, `set_sound_setting`, `send_text_input`).
+  - Added test cases covering switches, in-use binary sensors, Home Assistant reauth flow, reconfigure flow, mDNS/Zeroconf discovery, and full multi-tier authentication cascade (68 passing tests).
+
+## [2.8.5] - 2026-09-15
+
+### Added
+
+- **PICTURE & DISPLAY CONTROLS (`number` and `select` platforms - Issue #20)**:
+  - Added `number.{tv}_backlight`, `number.{tv}_brightness`, and `number.{tv}_contrast` slider entities (0–100) for real-time picture adjustments over MQTT.
+  - Added `select.{tv}_picture_mode` dropdown entity with options dynamically discovered from the TV (with fallback to `Standard`, `Cinema Day`, `Cinema Night`, `Dynamic`, `Sport`, `Game`, `Filmmaker Mode`, `PC`).
+  - Added `select.{tv}_sound_mode` dropdown entity for real-time sound equalizer mode switching (`Standard`, `Theater`, `Music`, `Speech`, `Late Night`, `Sports`).
+- **NEW AUTOMATION SERVICES**:
+  - `hisense_vidaa.set_picture_setting`: Execute arbitrary picture setting changes via `menu_id` and `menu_value`.
+  - `hisense_vidaa.set_sound_setting`: Execute arbitrary sound equalizer adjustments via `menu_id` and `menu_value`.
+  - `hisense_vidaa.send_text_input`: Inject text strings directly into TV search bars and text fields via `actions/txtinputdata` and `actions/bwsinputdata`.
+- **FEATURE PROBING & GITHUB ISSUE DIAGNOSTICS**:
+  - Added shared `probe.py` module for discovering TV capabilities and querying picture/sound menu structures.
+  - Added `probe` CLI command and `--probe` reporting flag to `test_client.py` and `debug_tv.py`, generating pre-formatted Markdown diagnostics tables ready for GitHub issue submissions.
+
+### Fixed
+
+- **STANDARD HOME ASSISTANT SSL DIRECTORY (Issue #21)**:
+  - Standardized certificate search paths to standard Home Assistant directories (`/config/ssl`, `/ssl`, `/config/certs`, `/config`).
+  - Stopped auto-reconnect loops and broker hammering when credentials expire (`rc: 5`), preventing collisions during re-pairing handshakes.
+- **CODEBASE MODULARIZATION**:
+  - Extracted menu models and parsers into `settings.py`.
+  - Extracted app fuzzy matching, source cycling, and key alias definitions into `navigation.py`.
+  - Consolidated CLI test and debugging tools to share common probing and credential handlers.
+
+## [2.8.1] - 2026-09-13
+
+### Added
+
+- **SESSION STATUS SENSOR (`sensor.{tv}_session_status`)**: Replaced the misleading "Token Expiry" timestamp countdown with an intuitive diagnostic `Session Status` sensor tracking live authentication state (`Active`, `Standby`, `Reauth Required`) with rich attributes (`paired_at`, `auth_profile`, `encryption`, `client_id`).
+
+### Fixed
+
+- **SELECTIVE PLATFORM UNLOAD ON RECONFIGURATION**: `async_unload_entry` now unloads only the dynamically enabled platforms recorded during setup instead of static `PLATFORMS`. This prevents `ValueError: Config entry was never loaded!` crashes when unloading entries where optional platforms (such as `notify` or `remote`) are disabled or not supported, resolving `ConfigEntryState.FAILED_UNLOAD` and preserving the ability to reload and reconfigure options from the UI.
+- **MATERIAL DESIGN ICON CORRECTION**: Updated Sync Clock button icon to standard `mdi:clock-outline` in `button.py` and `icons.json` to fix broken icon rendering.
+
+### Removed
+
+- **REDUNDANT REFRESH TOKEN BUTTON**: Removed `button.{tv}_refresh_access_token` since VIDAA firmware does not require or execute periodic manual token rotations during active pairing sessions.
+
+## [2.8.0] - 2026-09-11
+
+### Added
+
+- **ON-SCREEN TOAST NOTIFICATIONS (`notify` platform)**: Added `notify.{tv}` platform entity implementing `NotifyEntity` and `async_send_message` to broadcast on-screen popup notification banners (doorbell alerts, timers, security warnings) via VIDAA MQTT topics (`actions/showmessage` / `actions/toast`).
+- **AUDIO OUTPUT MODE SELECTOR (`select` platform)**: Added `select.{tv}_audio_output` entity allowing users to view and select the TV's audio output routing (`TV Speakers`, `ARC / eARC`, `Headphone / Bluetooth`) from automations and dashboards.
+- **CATEGORIZED & TABBED OPTIONS FLOW**: Completely redesigned the Options Flow (**Configure**) into intuitive, categorized submenus:
+  - ⚡ **General & Power Options**: Dedicated remote entity toggle, Wake-on-LAN, Secondary MAC, and SSL encryption.
+  - 📺 **Sources & Media Controls**: Smart TV app listing, media transport controls, and HDMI-CEC source labeling.
+  - 🎮 **Remote Key Timings & Repeats**: Configurable keypress delay (seconds slider) and repeat count box.
+  - 🔒 **SSL Certificates & Security**: Custom certificate and private key paths.
+- **DYNAMIC HDMI-CEC SOURCE RENAMING**: Media player source list automatically shows connected HDMI-CEC device names (e.g. `"HDMI 2 (PlayStation 5)"`) with smart input stripping on selection.
+- **DUAL-MAC WAKE-ON-LAN FALLBACK**: WoL magic packet broadcasting now sends packets to both primary and secondary MAC addresses (Ethernet & Wi-Fi) across ports `9` and `7`.
+- **APPLE HOMEKIT TELEVISION ACCESSORY SUPPORT**: Explicitly configured `_attr_device_class = MediaPlayerDeviceClass.TV` for seamless bridging to Apple Home and the native iOS Control Center TV Remote widget.
+- **US EDITION LOVELACE REMOTE CARD**: Added pixel-accurate North American remote configuration ([`examples/lovelace-us-remote-card.yaml`](examples/lovelace-us-remote-card.yaml)) featuring Netflix, YouTube, Prime Video, Disney+, Hulu, Peacock, Max, and Tubi quick-launch buttons.
+
+### Fixed
+
+- **REMOTE & MEDIA PLAYER POWER STATE SYNCHRONIZATION**: Remote entity now initializes state from active client connection and registers `connected_callback`, eliminating out-of-sync `off` state when Home Assistant starts while the TV is already running.
+- **IDEMPOTENT `turn_on` POWER PROTECTION**: Calling `turn_on` on the remote or media player when the TV is already connected and active is now safely idempotent and will NOT send `KEY_POWER`, preventing accidental TV shutdown caused by power toggle behavior.
+- **FAKE SLEEP RECOVERY**: Retained dedicated `KEY_POWER` display wake dispatch when turning on from low-power standby (`statetype == "fake_sleep_0"`).
+
+## [2.7.5] - 2026-09-11
+
+### Added
+
+- **LOVELACE REMOTE CARDS & PHYSICAL REMOTE CONFIGURATIONS**: Added 5 ready-to-use Lovelace remote card example configurations in [`examples/`](examples/):
+  - `lovelace-australian-remote-card.yaml`: Pixel-accurate 12-app EN2G30H Australian physical remote layout with streaming quick-launch buttons.
+  - `lovelace-classic-remote-card.yaml`: Traditional Free-to-Air remote layout without streaming app shortcuts, focusing on D-pad navigation, volume/channel rockers, full 12-key numpad, and media transport controls.
+  - `lovelace-button-card-remote.yaml`: Modular vertical stack remote layout with standard button cards.
+  - `lovelace-android-tv-card.yaml`: Custom integration profile for `android-tv-card`.
+  - `lovelace-tv-card.yaml`: Clean layout for `tv-card`.
+- **WORLDWIDE & REGIONAL SMART APP SHORTCUTS**: Added comprehensive alias mappings and normalized regex/fuzzy matching in `_launch_app_by_name` across Australia/NZ (ABC iview, SBS On Demand, 7plus, 9Now, 10 play, Stan, Kayo, Binge, Foxtel, Optus Sport, TVNZ+, ThreeNow, Neon), UK/Europe (BBC iPlayer, ITVX, Channel 4, My5, NOW, Discovery+, RTL+, Joyn, RaiPlay, RTVE Play), North America (Peacock, Hulu, Sling TV, FuboTV, Philo, Roku, Vudu, Crackle, Freevee, CBC Gem, Crave), and Global services (Disney+, Apple TV, Max/HBO, Paramount+, Spotify, Tidal, Plex, Crunchyroll, DAZN, Tubi, Pluto TV, Rakuten, MUBI, UFC, NBA, UEFA.tv, F1 TV).
+- **DUAL-COMPATIBILITY INPUT CYCLING & LIVE TV TUNER FIX**: Resolved input cycling stall on broadcast TV (`livetv`) by passing both `sourceid` and string `sourcename` (dual-publishing for older numeric and modern string firmware compatibility). Added fallback `KEY_LIVETV` trigger when switching to Live TV mode.
+- **DIRECT `source:<name>` & `app:<name>` TARGETING**: Added direct prefix targeting in `send_command` (`source:HDMI2`, `app:Stan`) to allow one-shot switching from remote keypads and scripts.
+- **EXTENDED KEY ALIASES**: Added comprehensive key aliases across all international and model variants including `text` / `teletext` / `txt`, `guide` / `epg`, `chlist` / `channel_list`, `key_input`, `key_source`, `key_input_menu`, and color keys.
+
+## [2.7.0] - 2026-09-11
+
+### Added
+
+- **MULTI-FORMAT CERTIFICATE & PKCS#12 BUNDLE SUPPORT**: Native support for direct PKCS#12 keystore archives (`.p12`, `.pfx` such as `client_mobile_android.p12` or `rcamobile.p12`) with automatic certificate and private key extraction using standard cryptography, eliminating the need to execute manual `openssl` CLI extraction commands.
+- **OPTIONAL SERVER ROOT CA VERIFICATION**: Added support for custom root CA files (`remote_ca.pem`, `RemoteCA.crt`) with `verify_ssl` opt-in while keeping default `CERT_NONE` matching official VIDAA mobile app behavior.
+- **AUDIO OUTPUT TYPE SENSOR (`sensor.{tv}_audio_output`)**: Dedicated sensor tracking live audio output mode (`TV Speakers`, `ARC / eARC`, `Muted`) parsed in real-time from TV volume state broadcasts (`volume_type`).
+- **HDMI-CEC DEVICE & LIVE TV CHANNEL METADATA**: Media player and active source sensor now track connected HDMI-CEC device name (`connected_device` attribute, e.g. Apple TV, PlayStation 5, Chromecast) and Live TV channel metadata (`channel_name`, `channel_number`).
+- **`KEY_AUDIO` SCREEN-OFF HARDWARE COMMAND**: Added key alias mappings (`audio_only`, `screen_off`) to `KEY_AUDIO` allowing users to turn off the TV display panel while keeping background audio playback active.
+- **REMOTE HOLD & RAPID BURST KEY SUPPORT**: Added `hold_secs` duration support in `remote.send_command`, mapping to `KEY_OK_LONG_PRESS` / `KEY_MUTE_LONG_PRESS` and high-speed key repetitions.
+- **DEEP LINK & DIRECT CHANNEL NUMBER TUNING**: `play_media` now handles direct URI schemes (`netflix://`, `youtube://`, `https://...`) and numeric / decimal channel tuning sequences (e.g. `"70"`, `"7.1"` sending `KEY_CHANNELDOT`).
+- **EXTENDED CLI DIAGNOSTICS & TESTING**: Added `launch-app`, `wake`, `--p12`, `--ca`, and `--verify-ssl` subcommands/flags to `test_client.py`.
+- **STATIC DHCP & ETHERNET GUIDELINES**: Added network best practices documentation detailing fixed IP reservations and wired Ethernet for reliable Wake-on-LAN (WoL) from deep standby.
+
+## [2.6.0] - 2026-09-11
+
+### Added
+
+- **MEDIA TRANSPORT CONTROLS OPTION (`enable_media_controls`)**: Added new configurable option (default: enabled) to expose or suppress the media player transport control bar (play/pause, stop, skip). Useful for users who only need the TV as an input switcher without transport buttons cluttering the media player card.
+- **ACTIVE SOURCE SENSOR (`sensor.{tv}_active_source`)**: Dedicated sensor tracking the currently selected physical input or app (`HDMI1`, `HDMI2`, `TV`, `Netflix`, etc.), with extra attributes for all `available_sources`, `connected_inputs`, and user-defined custom HDMI labels.
+- **ACTIVE APP SENSOR (`sensor.{tv}_active_app`)**: Dedicated sensor tracking the currently running Smart TV application name, with extra attributes for `total_installed_apps` and `favorite_apps`.
+- **DYNAMIC APP ARTWORK**: `media_image_url` now resolves live CDN icon URLs from the TV's app registry for the currently active app, enabling rich media player card artwork in the HA UI.
+- **SYNC CLOCK BUTTON (`button.{tv}_sync_clock`)**: Diagnostic button to trigger manual TV clock synchronization via UPnP/DLNA `Date` header extraction, resolving pairing hash mismatches after NTP failures or offline periods.
+- **MQTT CONNECTED BINARY SENSOR (`binary_sensor.{tv}_mqtt_connected`)**: Connectivity sensor reflecting real-time MQTT broker connection state, distinct from TV power state.
+
+### Changed
+
+- **DYNAMIC `supported_features`**: The media player `supported_features` property is now computed dynamically based on the `enable_media_controls` option rather than being a fixed static bitmask. Transport controls (`PLAY`, `PAUSE`, `STOP`, `NEXT_TRACK`, `PREVIOUS_TRACK`) are only advertised when the option is enabled (default: on).
+
+## [2.5.0] - 2026-09-11
+
+### Added
+
+- **HACS & HASSFEST CI VALIDATION**: Added complete HACS repository configuration (`hacs.json`) with minimum Home Assistant version requirements, `integration_type: "device"` in `manifest.json`, and configured dual-action CI validation (`hassfest` + `hacs/action`) on every pull request and push.
+- **SECURITY HARDENING & DEFUSED XML PARSING**: Integrated `defusedxml` into UPnP/DLNA XML discovery parsers to protect against XML Entity Expansion (Billion Laughs) and external DTD vulnerabilities during discovery.
+- **CLIENT ARCHITECTURE REFACTORING**: Extracted socket and probe diagnostics to `discovery.py`, implemented centralized callback registry and thread-safe dispatching, reducing `client.py` footprint by ~60% while maintaining 100% backward compatibility.
+- **SUBNET-AWARE WAKE-ON-LAN**: Enhanced Wake-on-LAN magic packet transmission to broadcast to both the target `/24` subnet directed broadcast address (e.g. `192.168.50.255`) and `255.255.255.255` for maximum cross-VLAN/routed network reliability.
+- **CONFIG FLOW UX & SANITIZATION**: Added interactive `SelectSelector` dropdown with friendly descriptive profile labels (`Auto Detect`, `VIDAA 2.0 / 2024+`, `RemoteNOW / 2018–2023`, `Legacy Unencrypted`), smart certificate routing (skipping cert modal if valid certs exist on disk), and automatic PIN sanitization (stripping spaces/dashes).
+- **EXTENDED MQTT TOPIC COVERAGE**: Added subscription and dispatch handling for `/remoteapp/mobile/broadcast/ui_service/volume`, `/remoteapp/mobile/broadcast/ui_service/data/hotelmodechange`, `/remoteapp/mobile/{client}/platform_service/data/gettvinfo`, `/remoteapp/mobile/{client}/platform_service/data/getdeviceinfo`, `/remoteapp/mobile/{client}/ui_service/data/capability`, and direct state replies on `.../ui_service/data/state`.
+- **EXTENDED REMOTE KEY ALIASES**: Added aliases for `ok_long`, `mute_long`, `mouse`, `zoom_in`, `zoom_out` to `KEY_ALIASES`.
+- **EXPANDED TEST SUITE**: Added comprehensive unit tests covering subnet WoL broadcasting, volume topic variants, callback error isolation, and defused XML malformed data recovery (33 passing unit tests).
+
+## [2.2.0] - 2026-09-11
+
+### Added
+
+- **LEGACY STATIC AUTHENTICATION PROFILE (`legacy`)**: Added native support for pre-2022 Hisense TVs using static MQTT credentials (`hisenseservice` / `multimqttservice`). Automatically probes TV capabilities, bypasses PIN pairing, and disables token refresh loops for legacy devices.
+- **AUTOMATIC TV CLOCK SYNCHRONIZATION**: Added UPnP/DLNA HTTP `Date` header extraction to synchronize pairing timestamp calculations directly with the TV's internal clock, preventing `rc: 5` / `rc: 4` authentication rejections during clock drift or offline time rollover.
+- **NATIVE HOME ASSISTANT REAUTH & RECONFIGURE FLOWS**: Implemented `async_step_reauth`, `async_step_reauth_confirm`, and `async_step_reconfigure` (`supports_reconfigure: true`) with automated reauth triggering upon expired sessions and one-click PIN regeneration.
+- **CLI DIAGNOSTIC PROBE ENHANCEMENTS**: Updated `test_client.py` with `--profile legacy`, dynamic 3-tier auth compatibility probing (Legacy Static, Standard Dynamic, Modern Dynamic), and Markdown issue reporting.
+
+### Fixed
+
+- **ENTITY STATE & AVAILABILITY OVERHAUL**: Media player and remote entities now correctly report `state = STATE_OFF` (`"off"`) with `available = True` while the TV is in standby/disconnected, preserving UI power toggles and automation triggers.
+- **CODE DEDUPLICATION & ARCHITECTURAL REFACTORING**: Extracted options flow into dedicated `options_flow.py`, centralized ARP hardware MAC resolution in `discovery.py`, and ensured 100% logic sharing between the HA integration and `test_client.py`.
+
+## [2.0.0] - 2026-09-06
+
+### Added
+
+- **MODULAR ARCHITECTURE REFACTOR**: Modularized the codebase into single-responsibility components: [`crypto.py`](custom_components/hisense_vidaa/crypto.py) (authentication hashing, XOR masking, and cert discovery), [`discovery.py`](custom_components/hisense_vidaa/discovery.py) (UPnP XML and mDNS discovery), [`const.py`](custom_components/hisense_vidaa/const.py) (constants and profile definitions), and [`client.py`](custom_components/hisense_vidaa/client.py) (async MQTT lifecycle).
+- **DUAL-TIER AUTHENTICATION PROFILE SELECTOR**: Added support for choosing between Modern VIDAA 2.0 (`libmqttcrypt.so` / `Q0704`+ with XOR mask and Modern salt `h!i@s#$v%i^d&a*a`) and Legacy RemoteNOW (`h*i&s%e!r^v0i1c9` salt), alongside automatic profile detection and selective certificate resolution (`vidaa_2024_*`, `remotenow_2018_*`, and `cert.pem`).
+
+### Fixed
+
+- **INSTANT 1ST-ATTEMPT PAIRING**: Resolved race condition during initial pairing where the TV challenge response arrived before the MQTT subscription was acknowledged by adding a 500ms subscription settling delay and multi-attempt retry loop for `vidaa_app_connect`.
+- **RECONNECTION STORM PROTECTION**: Added exponential reconnect backoff (`min_delay=2, max_delay=30`) and safe executor-based disconnection handling upon config entry unload.
+- **GITHUB ACTIONS RELEASE WORKFLOW**: Fixed `actions/checkout` versioning and changelog extraction parser in CI release workflows.
+
+## [1.5.0] - 2026-09-06
+
+### Added
+
+- **OPTIONS FLOW SUPPORT**: Added `OptionsFlowHandler` allowing full configuration of features and device behaviors via **Settings -> Devices & Services -> Configure** on existing TVs without re-pairing.
+- **DEDICATED REMOTE ENTITY PLATFORM (`remote`)**: Added native `remote` entity (`remote.<tv_name>`) supporting D-pad navigation, numeric keypad, channel switching, media controls, color buttons, and app shortcuts.
+- **MEDIA CONTROLS EXPANSION**: Added `PLAY`, `PAUSE`, `STOP`, `NEXT_TRACK`, `PREVIOUS_TRACK`, and `PLAY_MEDIA` support to the `media_player` entity.
+- **SMART TV APPS IN SOURCE LIST**: Configurable option (`include_apps_in_sources`) to dynamically include installed Smart TV apps (Netflix, YouTube, Prime, Plex, etc.) in the `media_player` source dropdown alongside hardware HDMI/TV inputs.
+- **WAKE-ON-LAN POWER ON**: Configurable option (`enable_wol`) to broadcast a UDP magic packet on `turn_on` to wake TVs from deep standby.
+- **KEY ALIAS RESOLUTION**: Added alias normalizer supporting friendly command names (`up`, `down`, `home`, `menu`, `back`, `netflix`, `youtube`, etc.) across `remote.send_command` and CLI `test_client.py`.
+
+## [1.4.2] - 2026-09-06
+
+### Added
+
+- **DYNAMIC TV DEVICE & ENTITY NAMING**: Config flow now automatically detects the TV's broadcast friendly name (e.g. `Smart TV`, custom name from TV settings, or model code) via UPnP/mDNS and names the Home Assistant device and entity accordingly upon pairing.
+
+## [1.4.1] - 2026-09-06
+
+### Added
+
+- **GITHUB ISSUE DIAGNOSTIC REPORT (`report`)**: Added `python3 test_client.py report --ip <IP>` command generating a pre-formatted, redacted Markdown diagnostic block with hardware specs, firmware indicators, and auth capabilities ready to paste into GitHub issues.
+- **ACTIVE MULTI-TIER AUTH PROBING**: Enhanced `ping` and `report` with live compatibility testing for standard dynamic (`his$<timestamp>`), modern dynamic (XOR), and legacy static (`hisenseservice`) pairing handshakes.
+- **AUTOMATED DEVICE FINGERPRINTING**: Added UPnP/DLNA XML parser and mDNS discovery to automatically identify TV model names, VIDAA platform capabilities, and Wi-Fi / Ethernet MAC addresses.
+
+## [1.4.0] - 2026-09-06
+
+### Added
+
+- **NEW VIDAA FIRMWARE AUTHENTICATION FALLBACK**: Added support for newer VIDAA OS firmware versions (e.g. `V0000.09.09U.P1027`) where the internal broker rejects pairing with MQTT `rc: 5`. The integration now automatically falls back to XOR timestamp credential hashing (`his${timestamp ^ 6239759785777146216}`) on `rc: 5` pairing failures.
+- **IMPROVED CONNECTION CLEANUP**: Ensured MQTT client disconnect and loop termination on failed initial pairing attempts.
+
+## [1.3.1] - 2026-09-04
+
+### Changed
+
+- **DOCUMENTATION & REPOSITORIES**: Updated references to legacy alternatives ([`sehaas/ha_hisense_tv`](https://github.com/sehaas/ha_hisense_tv) and [`Krazy998/mqtt-hisensetv`](https://github.com/Krazy998/mqtt-hisensetv/)).
+- **PROBE MESSAGES**: Pointed diagnostic probe output in `client.py` directly to the README section for integration selection guidance.
+
+## [1.3.0] - 2026-09-04
+
+### Added
+
+- **STANDARD HACS DIRECTORY STRUCTURE**: Relocated integration files into standard `custom_components/hisense_vidaa/` layout for seamless HACS installation and updates.
+- **HACS BRANDING & ASSETS**: Included icon and logo brand assets inside the component directory for HACS validation.
+- **MY HOME ASSISTANT BADGE**: Added 1-click installation badge and updated documentation for HACS Custom Repository setup.
+
+### Changed
+
+- **HACS CONFIGURATION**: Removed deprecated `content_in_root` attribute in `hacs.json`.
+- **CI WORKFLOWS**: Streamlined Hassfest validation and HACS Action checks to run directly on the standard component directory.
+
+## [1.2.0] - 2026-09-04
+
+### Added
+
+- **CONNECTIVITY & FIRMWARE PROBE (`ping`)**: Added a 3-tier diagnostic probe (TCP port, TLS handshake, and broker response) with automatic firmware detection (suggests legacy vs modern VIDAA integration).
+- **SSL CERTIFICATE TESTING (`test-ssl`)**: Added dedicated `test-ssl` command and `test_ssl_connection()` method to verify TLSv1.2 cipher suites and certificate validity directly against port 36669.
+- **CUSTOM CERTIFICATE PATHS**: Added support for explicit `--cert` and `--key` arguments with fallback search order (`custom` -> `certs/` -> `/config/certs/` -> `/config/ssl/`).
+- **STANDALONE TEST SUITE (`test_client.py`)**: Unified testing utility sharing 100% of its backend logic with the Home Assistant `HisenseTvClient` integration code.
+- **AUTOMATIC MAC ADDRESS DISCOVERY**: Removed manual MAC address input from the setup modal; the integration now automatically discovers and formats the hardware MAC address via ARP cache and binds it to the Home Assistant Device Registry.
+- **DOCUMENTATION OF LEGACY ALTERNATIVES**: Added comprehensive guide in README referencing established legacy integrations (`ha_hisense_tv`, `hisensetv`, `mqtt-hisensetv`) for older static-credential models.
+
+### Fixed
+
+- **ENTITY NAMING DUPLICATION**: Fixed entity ID generation producing `media_player.hisense_tv_hisense_tv_...` by setting `_attr_has_entity_name = True` and removing redundant name overrides (Issue #5).
+- **THREAD-STORM PREVENTION**: Added mutex locks and a 10-second minimum cooldown to prevent thread storms and runaway CPU usage during connection failures or network drops (Issue #6).
+- **THREAD-SAFE ASYNC FUTURE COMPLETION**: Wrapped event loop futures with `call_soon_threadsafe` across Paho-MQTT network threads and asyncio loops to ensure instantaneous challenge PIN and token resolution.
+- **STARTUP BLOCKING CALLS**: Offloaded certificate loading and MQTT client instantiation to `loop.run_in_executor` during async config flows.
+
+## [1.1.0] - 2026-07-21
+
+### Fixed
+
+- **STANDBY WAKE-UP**: Switched `turn_on` method from Wake-on-LAN to direct MQTT `KEY_POWER` command, resolving standby power control issues.
+- **STABLE BACKGROUND POLLING**: Fixed token expiration causing permanent disconnection after the TV was turned off for more than 2 hours. The integration now intercepts MQTT auth failures, asynchronously refreshes the access token, updates Paho credentials, and reconnects in the background.
+- **NON-BLOCKING STARTUP**: Modified startup MQTT connection loop to be non-blocking. If the TV is powered down when Home Assistant boots, the integration setup succeeds and auto-connects as soon as the TV becomes reachable on the network.
+- **DYNAMIC TOKEN STORAGE**: Refreshed tokens are now dynamically persisted back to the Config Entry in Home Assistant, surviving restarts.
+
+### Removed
+
+- **WAKE-ON-LAN**: Removed `wakeonlan` package dependency and UDP magic packet dispatching entirely. Retained MAC address configuration input solely for device registry binding.
+- **MEDIA BROWSER**: Removed Home Assistant Media Browser and `PLAY_MEDIA` features to simplify integration and prevent diagnostic errors.
+
+## [1.0.0] - 2026-07-19
+
+### Added
+
+- **Initial Release**: Native Home Assistant custom integration for Hisense VIDAA smart TVs using local secure MQTT and UPnP protocols.
+- **Direct Secure Connection**: Native connection directly to the TV's secure TLS MQTT broker on port `36669` using certificates packaged with the component. No Mosquitto configuration or systems-level bridges are required.
+- **User-Friendly Setup**: Integrated Config Flow for simple step-by-step setup in the Home Assistant UI (IP, optional MAC, and automatic display-and-entry challenge PIN).
+- **Core Controls**: Complete media player capabilities (Power toggle, volume adjustment, volume steps, mute/unmute).
+- **Filtered Input Source List**: Cleaned up the input source selector to list only hardware interfaces (HDMI1, HDMI2, HDMI3, TV, AV) and ignore internal VIDAA app services, keeping the UI simplified.
+- **Robust Connection Handlers**: 
+  - Offloaded MQTT connections to a thread pool executor.
+  - Used event-loop threadsafe hooks (`call_soon_threadsafe`) for UI state updates.
+  - Added smart token refresh logic on startup to prevent session conflicts and infinite reloading loops.
+
+## Unified VIDAA deployment
+
+- Preserve user-only permissions for derived PKCS#12 keys with atomic writes.
+- Use independent mobile pairing identities and keep the device MAC for discovery.
+- Document the architecture, feature evidence, test results and rollback.
+- Advertise relative volume and mute on ARC/eARC where this TV ignores
+  absolute volume requests.
+- Bring over standalone V4n1X volume, TV state, and firmware/hardware
+  telemetry as sensors on the existing VIDAA device.

@@ -1,0 +1,273 @@
+# ⚙️ Configuration & Options Parameters Reference
+
+This document provides a comprehensive reference for all user-configurable parameters across the **Initial Setup (Config Flow)** and **Options Flow** in the **VIDAA Smart TV** (`vidaa`) Home Assistant integration.
+
+---
+
+## 📡 Data Update & Local Push Architecture
+
+The integration operates using **100% Local Push (`iot_class: local_push`)**:
+
+- **No Background Polling**: Home Assistant does not poll the TV for power state, volume, active app, or input sources. The TV pushes live state updates over a persistent, encrypted TLS MQTT connection (port `36669`) as events occur.
+- **Instant Response**: Power changes, volume adjustments, and playback state transitions are reflected instantly in Home Assistant UI.
+- **Clock Sync Interval**: A lightweight UPnP request runs every 2 hours (and on wake transition from standby) to check host-to-TV hardware clock drift without polling media telemetry.
+
+---
+
+## 📱 Supported Entities, Platforms & Features
+
+The integration automatically registers entities across 9 Home Assistant platforms:
+
+| Platform            | Entity Class                | Description & Features                                                                                                                                                                                |
+|:------------------- |:--------------------------- |:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`media_player`**  | `MediaPlayerDeviceClass.TV` | Power toggle, volume step/set, mute, source input switcher, Smart TV app launcher, media transport controls (Play, Pause, Stop, Next, Previous), active source/app artwork, display state, and state attributes (`hotel_mode`, `audio_output`, `raw_source`, `connected_device`). |
+| **`remote`**        | `RemoteEntity`              | Discrete key press commands, sequence dispatching (`vidaa.send_key_sequence`), configurable inter-key delays, and repeat counts.                                                              |
+| **`sensor`**        | `SensorEntity`              | Active Source, Active App, Audio Output Mode, Session Status, Auth Profile, and Hardware Clock Drift offset ($> 60\text{s}$ warning threshold).                                                       |
+| **`binary_sensor`** | `BinarySensorEntity`        | Live MQTT Connection state and In Use indicator.                                                                                                                                                      |
+| **`button`**        | `ButtonEntity`              | **Sync TV Clock**, **Force Reconnect**, **Start Re-authentication**, and **Probe Capabilities** diagnostic buttons.                                                                                                                |
+| **`switch`**        | `SwitchEntity`              | **Debug Logging** logger toggle and **Audio Only** screen backlight toggle.                                                                                                                           |
+| **`select`**        | `SelectEntity`              | **Picture Mode** (`Standard`, `Cinema Day`, `Cinema Night`, `Dynamic`, `Sports`, `Game`, `Filmmaker`) and **Sound Mode** switcher (`Standard`, `Theatre`, `Music`, `Speech`, `Late Night`, `Sports`). |
+| **`number`**        | `NumberEntity`              | Calibration sliders for **Backlight**, **Brightness**, and **Contrast** (0–100).                                                                                                                      |
+
+---
+
+## ⚠️ Known Limitations
+
+Before deploying the integration, note the following hardware and firmware limitations:
+
+1. **No ICMP Ping in Standby**: Most VIDAA televisions turn off their ICMP ping responder while in low-power standby (`fake_sleep_0`). ICMP ping integration or ping binary sensors will report the TV as offline during standby.
+2. **Wi-Fi Wake-on-LAN Unreliability**: Wake-on-LAN (WoL) over 802.11 Wi-Fi can drop initial packets when the TV's Wi-Fi module enters deep power-saving mode. Connecting the TV via wired Ethernet or enabling multi-burst WoL in options is strongly recommended.
+3. **Firmware Compatibility Gaps**: Pre-2018 VIDAA TV models (VIDAA U2 or earlier) lack the internal MQTT broker daemon on port `36669` and cannot be controlled via local TLS MQTT.
+4. **App Deep-Linking Restrictions**: Certain Smart TV applications (e.g. Netflix, Disney+) enforce proprietary DRM restrictions that prevent launching directly into specific video content URLs without navigating through the app's main UI.
+5. **Mouse Cursor Browser-Only Scope**: The on-screen mouse pointer in VIDAA OS is exclusively functional when running the TV's native **Web Browser** application (*"Only available in Browser"*). VIDAA's home screen and video streaming apps do not support cursor movement and use standard D-pad directional controls (`up`, `down`, `left`, `right`, `ok`). Mouse button clicks (`mouse_click`, `mouse_up`, `mouse_down`) and zoom keys (`zoom_in`, `zoom_out`) can be dispatched via `remote.send_command`.
+6. **Virtual Keyboard Text Injection Requirements**: Text injected via `vidaa.send_text_input` or `remote.send_command` (`text:<string>`) targets the active search bar or input field on screen. The TV OS requires an active on-screen keyboard dialog or focused text entry box (e.g. in YouTube search, web browser, or Wi-Fi settings); sending text while on passive video playback or menus without input fields will be ignored by the TV.
+
+---
+
+## 🚀 1. Installation & Setup Parameters (Config Flow)
+
+When adding a new VIDAA Smart TV (**Settings → Devices & Services → Add Integration → VIDAA Smart TV**), the following parameters are available:
+
+| Parameter          | Type                 | Required                 | Default         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+|:------------------ |:-------------------- |:------------------------ |:--------------- |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`ip_address`**   | `string` (IPv4)      | **Yes**                  | None            | The local network IP address of the VIDAA Smart TV (e.g. `192.168.1.100`). It is strongly recommended to configure a static DHCP reservation on your router.                                                                                                                                                                                                                                                                                                                                                                   |
+| **`name`**         | `string`             | Optional                 | `<Brand> TV (<ip>)` | User-friendly display name used to prefix created entity IDs and device registry names.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **`mac_address`**  | `string` (MAC)       | Optional                 | Auto-discovered | Hardware Ethernet or Wi-Fi MAC address (e.g. `e8:51:77:aa:bb:cc`). Used for Wake-on-LAN packets and unique entity IDs. Discovered automatically via UPnP/ARP.                                                                                                                                                                                                                                                                                                                                                                    |
+| **`brand`**        | `select`             | Optional                 | `auto`          | TV / Projector OEM Brand profile selector. Defaults to `Auto Detect (Recommended)`, which automatically queries UPnP port `38400` / `18400` to extract `<modelDescription>` brand metadata, or matches certificate filenames. Can be manually overridden to any of 22+ OEM partners (Hisense, Toshiba, Loewe, TPV / Philips / AOC, Sharp, JVC, TOPTRO, Schneider, Akai, Beko, Telefunken, Bush, Vizio, Philco, Noblex, Sansei, RCA, Sinotec, Vestel, Brandt, Metz, Leica).                                                       |
+| **`auth_profile`** | `select`             | **Yes**                  | `auto`          | Authentication and certificate selection tier: <br>• `auto`: Dynamically cascades from modern dynamic auth to middle, standard, and legacy profiles.<br>• `modern`: Modern XOR-masked timestamp dynamic auth (VIDAA U6, U7, U8, 2024+ models).<br>• `middle`: Middle dynamic auth protocol (transport_protocol 3000–3285).<br>• `remotenow`: Legacy RemoteNOW protocol (VIDAA U3 / U4).<br>• `legacy`: Static authentication without timestamp hashing.<br>• `vidaa_2024`: 2024+ firmware profile with strict broker handshakes. |
+| **`pin_code`**     | `string` (4 digits)  | **Yes** (during pairing) | None            | The 4-digit numeric verification code displayed on the physical TV screen during the initial pairing handshake.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **`certfile`**     | `string` (file path) | Optional                 | Auto-resolved   | Absolute path to custom client TLS certificate (`.pem` or `.crt`). If omitted, automatically resolves from default bundle or `ssl/` folder.                                                                                                                                                                                                                                                                                                                                                                                      |
+| **`keyfile`**      | `string` (file path) | Optional                 | Auto-resolved   | Absolute path to custom client TLS private key (`.pem` or `.key`).                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **`ca_cert`**      | `string` (file path) | Optional                 | None            | Optional custom root Certificate Authority file for strict broker TLS verification.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+---
+
+## 🎛️ 2. Options Flow Parameters
+
+To customize integration behavior for an existing TV, navigate to **Settings → Devices & Services → VIDAA Smart TV → Configure**. Options are organized into 4 categorized tabs:
+
+### 2.1 Power & Network (`power_network`)
+
+| Parameter                   | Type      | Default | Description                                                                                                                                |
+|:--------------------------- |:--------- |:------- |:------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`enable_wol`**            | `boolean` | `true`  | Automatically sends Wake-on-LAN (WoL) magic packets to wake the TV when powering on from cold standby.                                     |
+| **`secondary_mac_address`** | `string`  | `None`  | Secondary MAC address (e.g., Ethernet MAC if paired over Wi-Fi, or vice-versa). WoL packets will be broadcast to both MACs simultaneously. |
+
+### 2.2 Playback & Sources (`playback_sources`)
+
+| Parameter                     | Type                      | Default | Description                                                                                                                                                                                                                                                                                                                     |
+|:----------------------------- |:------------------------- |:------- |:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`sources`**                 | `list` (multi-select)     | `All`   | Select which input sources and Smart TV applications appear in the `media_player` source dropdown. The active source is always preserved even if unselected.                                                                                                                                                                    |
+| **`include_apps_in_sources`** | `boolean`                 | `true`  | Merges installed Smart TV apps (Netflix, YouTube, Prime Video, etc.) directly into the `media_player` source selector dropdown.                                                                                                                                                                                                 |
+| **`enable_cec_names`**        | `boolean`                 | `false` | Automatically replaces generic input names (`HDMI1`, `HDMI2`) with discovered HDMI-CEC device names (e.g. `Apple TV`, `PlayStation 5`, `Chromecast`).                                                                                                                                                                           |
+| **`enable_media_controls`**   | `boolean`                 | `false` | Enables Play, Pause, Stop, Next, and Previous track controls on the media player entity. When enabled, Next/Previous track controls are **context-aware**: they step channels (`KEY_CHANNELUP`/`KEY_CHANNELDOWN`) while on Live TV, and step tracks (`KEY_FORWARDS`/`KEY_BACK`) when on streaming apps or external HDMI inputs. |
+| **`playback_debounce`**       | `float` (slider, seconds) | `0.5`   | Settle window duration to filter out transient rapid state flickers (e.g., buffering transitions) from re-triggering automations.                                                                                                                                                                                               |
+
+### 2.3 Entities & Remote Controls (`features_remote`)
+
+| Parameter                     | Type                      | Default | Description                                                                                                |
+|:----------------------------- |:------------------------- |:------- |:---------------------------------------------------------------------------------------------------------- |
+| **`enable_picture_controls`** | `boolean`                 | `true`  | Exposes `select.<tv>_picture_mode` and calibration number entities (Backlight, Brightness, Contrast).      |
+| **`enable_sound_controls`**   | `boolean`                 | `true`  | Exposes `select.<tv>_sound_mode` for switching audio modes (Standard, Theater, Music, Speech, Late Night). |
+| **`enable_audio_only`**       | `boolean`                 | `true`  | Exposes `switch.<tv>_audio_only` to turn off the TV display backlight while keeping audio playing.         |
+| **`key_delay`**               | `float` (slider, seconds) | `0.2`   | Delay in seconds between consecutive key commands when sending sequences or repeated keystrokes.           |
+| **`key_repeat`**              | `integer` (box)           | `1`     | Default number of times each keypress command is repeated.                                                 |
+
+### 2.4 Connection & Security (`security`)
+
+| Parameter          | Type                 | Default       | Description                                                                                                                                                                                                                                                                                             |
+|:------------------ |:-------------------- |:------------- |:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`auth_profile`** | `select`             | `auto`        | Authentication handshake profile (`auto`, `modern`, `middle`, `remotenow`, `legacy`).                                                                                                                                                                                                                   |
+| **`brand`**        | `select`             | `auto`        | TV / Projector OEM Brand profile (`auto`, `his`, `tos`, `loe`, `tpv`, `shp`, `jvc`, `sch`, `aka`, `bek`, `tel`, `bus`, `vic`, `phi`, `nob`, `san`, `rca`, `sin`, `ves`, `bra`, `met`, `lei`, `tpo`). Switching brands automatically derives fresh OEM pairing credentials without resetting entity IDs. |
+| **`use_ssl`**      | `boolean`            | `true`        | Toggle SSL/TLS socket encryption for broker communications.                                                                                                                                                                                                                                             |
+| **`certfile`**     | `string` (file path) | Auto-resolved | Custom client certificate path (`.crt`, `.pem`, `.p12`).                                                                                                                                                                                                                                                |
+| **`keyfile`**      | `string` (file path) | Auto-resolved | Custom client private key path (`.key`, `.pem`).                                                                                                                                                                                                                                                        |
+
+---
+
+## 🔄 3. Reconfiguration Flow
+
+In addition to the options flow, the integration implements a native **Reconfiguration Flow** (`async_step_reconfigure`).
+
+If your TV's local IP address changes (for example, if DHCP assigns a new lease) or you need to switch authentication profiles / update client certificates without losing device history:
+
+1. Go to **Settings → Devices & Services**.
+2. Locate your **VIDAA Smart TV** integration entry.
+3. Click the three-dots menu (`⋮`) and select **Reconfigure**.
+4. Update the **IP Address**, **Brand Profile**, and/or **Authentication Profile**.
+5. Home Assistant verifies the connection to the new IP and updates the existing configuration entry in place.
+
+> [!TIP]
+> Reconfiguring preserves all entity IDs, customized names, area assignments, dashboard cards, and historical statistics without requiring device deletion.
+
+---
+
+## 🩺 4. Diagnostic, Telemetry & Debugging Entities
+
+To facilitate real-time monitoring and troubleshooting directly from the Home Assistant UI, the integration provides several built-in diagnostic and maintenance entities under the **Diagnostic** category:
+
+### 4.1 Maintenance Buttons (`button`)
+
+| Entity ID                                 | Entity Name                  | Description                                                                                                                                                                                                                                                                                                                                                                                       |
+|:----------------------------------------- |:---------------------------- |:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`button.<tv>_sync_clock`**              | **Sync TV Clock**            | Queries the TV's UPnP `Date:` HTTP header on port `38400` / `18400`, recalculates host-to-TV clock drift in seconds, and updates the `sensor.<tv>_clock_drift` diagnostic entity. Resolves timestamp divergence issues causing token generation or signature failures.                                                                                                                           |
+| **`button.<tv>_force_reconnect`**         | **Force Reconnect**          | Resets exponential backoff counters (`rejected_refresh_failures`, `broker_rejection_failures`), tears down the active MQTT session socket, and attempts immediate reconnection. Awaits handshake resolution up to 3 seconds, raising an actionable `HomeAssistantError` (`auth_required` or `not_connected`) if connection cannot be established.                                                 |
+| **`button.<tv>_start_re_authentication`** | **Start Re-authentication**  | Initiates Home Assistant's native re-authentication flow. Transitions `media_player` and `remote` entities to `unavailable`, flips `binary_sensor.<tv>_authentication_problem` to `on`, opens an actionable repair issue in **Settings → System → Repairs**, and posts a clickable persistent notification directing the user to submit and complete PIN pairing.                                     |
+| **`button.<tv>_probe_capabilities`**      | **Probe Capabilities**       | Actively probes the TV over MQTT for supported Picture (contrast, brightness, backlight) and Sound (bass, treble, balance) settings, updating config entry options dynamically (disabled by default; enable in entity settings to probe newly discovered TV capabilities).                                                                                                                     |
+
+### 4.2 Diagnostic Sensors (`sensor` & `binary_sensor`)
+
+| Entity ID                                      | Entity Name                    | Description & Attributes                                                                                                                                                                                                                                                                                                                                                                                |
+|:---------------------------------------------- |:------------------------------ |:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`binary_sensor.<tv>_authentication_problem`** | **Authentication Problem**     | Device class `problem`. Turns `on` when TV broker rejects credentials (`rc: 134`, `rc: 4`, expired tokens) or when re-authentication is initiated. Normal operation state is `off`.                                                                                                                                                                                                                  |
+| **`binary_sensor.<tv>_mqtt_connected`**        | **MQTT Connected**             | Live binary indicator of whether the persistent TLS MQTT socket to port `36669` is currently established and active.                                                                                                                                                                                                                                                                                    |
+| **`binary_sensor.<tv>_in_use`**                | **In Use**                     | Indicates whether the TV display is powered on and actively drawing playback/content.                                                                                                                                                                                                                                                                                                                   |
+| **`sensor.<tv>_session_status`**               | **Session Status**             | Indicates active session state (`Active`, `Standby`, `Reauth Required`). Attributes: `client_id` (masked), `auth_profile`, `configured_auth_profile`, `brand_profile`, `active_brand`, `encryption` (TLS version/port), `local_only` (bool), `paired_at`, `access_token_expires_at`, `refresh_token_expires_at`.                                                                                 |
+| **`sensor.<tv>_clock_drift`**                  | **Clock Drift**                | Reports TV hardware clock drift in seconds relative to Home Assistant host (disabled by default). Automatically synchronized every 2 hours and on wake transition from standby. Changes icon between `mdi:clock-check-outline` (synced, $< 60\text{s}$) and `mdi:clock-alert-outline` ($> 60\text{s}$). Attributes: `synchronized` (bool), `drift_human`, `tv_time`, `host_time`, `last_synced`.    |
+| **`sensor.<tv>_reported_name`**                | **Reported Name**              | Displays the live friendly name reported by TV over MQTT/UPnP (disabled by default). Attributes: `ip_address`, `mac_address`, `model_name`, `manufacturer`, `firmware_version`.                                                                                                                                                                                                                        |
+| **`sensor.<tv>_active_source`**                | **Active Source**              | Current hardware input source name (`HDMI1`, `HDMI2`, `TV`, `AV`, `App`, `Home Launcher`, `Standby`, `Off`). Attributes: `display_name`, `connected_device`, `available_sources`, `connected_inputs`, `last_known_source`.                                                                                                                                                                          |
+| **`sensor.<tv>_active_app`**                   | **Active App**                 | Currently running Smart TV application name.                                                                                                                                                                                                                                                                                                                                                            |
+
+### 4.3 Media Player State Attributes
+
+The primary `media_player.<tv>` entity exposes rich runtime state attributes accessible in templates, automations, and frontend cards:
+
+| Attribute | Type | Description |
+|:--- |:--- |:--- |
+| **`hotel_mode`** | `boolean` | Indicates whether the TV has Hotel Mode active. When enabled by commercial firmware, TV menus, input switching, or volume ranges may be restricted. |
+| **`audio_output`** | `string` | Active audio routing path reported by the TV (`TV Speakers` or `ARC / eARC`). |
+| **`raw_source`** | `string` | Hardware input source identifier (e.g. `HDMI1`, `HDMI2`, `TV`, `AV`). |
+| **`connected_device`** | `string` | Friendly name of connected HDMI-CEC external equipment (e.g. `Chromecast`, `Apple TV`, `PlayStation 5`). |
+| **`custom_labels`** | `dict` | User-configured display name mappings for input ports. |
+| **`source_list`** | `list` | Full array of user-selectable inputs and Smart TV applications. |
+
+### 4.4 Control & Utility Switches (`switch`)
+
+| Entity ID                       | Entity Name       | Description                                                                                                                                                             |
+|:------------------------------- |:----------------- |:----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`switch.<tv>_debug_logging`** | **Debug Logging** | Dynamically enables or disables verbose `DEBUG` level logging for the `custom_components.vidaa` module in real-time without requiring a Home Assistant restart. |
+| **`switch.<tv>_audio_only`**    | **Audio Only**    | Turns off physical screen panel backlight while keeping audio playback streaming through TV speakers or ARC soundbar.                                                   |
+
+### 4.5 Re-authentication & Troubleshooting Architecture
+
+> [!NOTE]
+> **Why clicking "Start Re-authentication" doesn't immediately open a modal dialog:**
+> In Home Assistant core architecture, entity buttons execute exclusively on the backend server. A backend button entity cannot spontaneously inject a modal dialog over whatever dashboard or browser tab you happen to be viewing.
+> 
+> Instead, clicking **Start Re-authentication** initiates a standard Home Assistant config flow:
+> 1. A persistent notification appears with direct links to [Settings → System → Repairs](/config/repairs) and [Settings → Devices & Services](/config/integrations).
+> 2. The entry is marked as requiring re-authentication (`binary_sensor.<tv>_authentication_problem` turns `on`).
+> 3. Opening the repair card prompts a confirmation dialog. Once confirmed, Home Assistant initiates the live TLS handshake to the TV, causing the **4-digit PIN** to appear on screen.
+> 4. Enter the 4-digit PIN in the dialog. Upon completion, credentials are saved, entities return to available, and the notification and repair issue are automatically dismissed.
+
+---
+
+## 🛠️ 5. Home Assistant Debugging & Diagnostics Guide
+
+When troubleshooting communication, pairing, or state synchronization issues between Home Assistant and the TV, several debugging facilities are available:
+
+### 5.1 Enabling Debug Logging
+
+There are four convenient methods to enable verbose debug logging for the integration:
+
+#### Method 1: On-the-Fly via Diagnostic Switch (Recommended)
+
+Toggle the built-in diagnostic switch entity:
+
+- **Entity ID**: `switch.<tv>_debug_logging`
+- **Behavior**: Instantly sets the Python logger level for `custom_components.vidaa` to `DEBUG` without restarting Home Assistant or modifying any configuration files. Toggle off to return to `INFO` level.
+
+#### Method 2: Via Home Assistant UI
+
+1. Navigate to **Settings** → **Devices & Services**.
+2. Locate the **VIDAA Smart TV** integration card.
+3. Click the three-dot menu (**⋮**) and select **Enable debug logging**.
+4. Reproduce the issue, then return to the menu and click **Disable debug logging** to download the generated debug log bundle.
+
+#### Method 3: Via `configuration.yaml`
+
+Add or update the `logger` integration in your Home Assistant configuration:
+
+```yaml
+logger:
+  default: warning
+  logs:
+    custom_components.vidaa: debug
+```
+
+Apply by restarting Home Assistant or calling the `logger.reload` action.
+
+#### Method 4: Via Developer Tools Action (`logger.set_level`)
+
+Without restarting, navigate to **Developer Tools** → **Actions** and execute:
+
+```yaml
+action: logger.set_level
+data:
+  custom_components.vidaa: debug
+```
+
+---
+
+### 5.2 Downloading Home Assistant Diagnostics
+
+Home Assistant provides official sanitized diagnostic bundles for bug reports:
+
+1. Navigate to **Settings** → **Devices & Services** → **VIDAA Smart TV**.
+2. Click on the device or the integration three-dot menu (**⋮**) and choose **Download diagnostics**.
+3. **Privacy & Redaction**: The integration automatically sanitizes sensitive fields before generating the JSON file. Masked keys include:
+   - Certificate file paths (`ssl_cert`, `ssl_key`, `p12_path`, `client_cert_path`, `client_key_path`)
+   - Certificate passwords (`p12_password`)
+   - Session tokens (`access_token`, `refresh_token`, auth passwords)
+   - Network MAC addresses and unique hardware identifiers
+4. **Diagnostic Contents**:
+   - Integration entry options and network parameters
+   - Live client connection state and negotiated TLS cipher/version
+   - TV hardware fingerprint (model, chipset, software build, firmware version)
+   - UPnP capability probe results and hardware clock drift offset
+   - Broadcast telemetry and registered HDMI/source lists
+
+---
+
+### 5.3 Native Repairs & PIN Re-Pairing Flow
+
+- **Automated Repairs**: If the TV purges its internal mobile authentication token table or if credentials become invalid, the integration automatically registers a Home Assistant **Repair Issue** alerting you that re-authentication is required.
+- **Manual Trigger**: To proactively renew pairing or re-pair after TV firmware updates, press the **Start Re-authentication** entity (`button.<tv>_start_re_authentication` or `button.<tv>_trigger_re_pairing`) on the TV device page in Home Assistant. This immediately initiates the PIN entry dialog on your television screen and in the Home Assistant UI.
+
+---
+
+### 5.4 Inspecting Logs
+
+To view live integration logs:
+
+1. Go to **Settings** → **System** → **Logs**.
+2. Filter the search box by `custom_components.vidaa`.
+3. Key log entries to monitor:
+   - `[custom_components.vidaa.protocol.connection] [<ip>] Connected to TV MQTT broker`
+   - `[custom_components.vidaa.tv.tokens] [<ip>] Synchronized TV clock: <epoch> (offset: <n> s)`
+   - `[custom_components.vidaa.protocol.connection] [<ip>] MQTT session error: Disconnected during message iteration`
+   - `[custom_components.vidaa.protocol.dispatcher] [<ip>] Message received: <payload> on topic <topic>`
+
+> **Audio output routing & external amplifiers (ARC/eARC):**
+> - `media_player.<tv>` exposes an `audio_output` attribute (`TV Speakers` or `ARC / eARC`), derived from the TV's `volume_type` broadcasts (retiring legacy standalone sensor/select entities). VIDAA firmware does not report Optical/SPDIF or Bluetooth output over MQTT, so those modes appear as `TV Speakers`.
+> - **Volume slider vs. external amplifiers:** Moving the volume slider sends an absolute level (`actions/changevolume`), which VIDAA OS only applies to internal TV speakers. When audio is routed to an external soundbar or AVR via ARC/eARC, the TV ignores absolute percentage values and only forwards step commands (`KEY_VOLUMEUP` / `KEY_VOLUMEDOWN`). Use `media_player.volume_up` / `media_player.volume_down` for external amplifiers.

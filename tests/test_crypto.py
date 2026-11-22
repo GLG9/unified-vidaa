@@ -1,0 +1,470 @@
+"""Unit tests for crypto and certificate resolution functions."""
+
+import hashlib
+import os
+from datetime import UTC, datetime, timedelta
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs12
+
+from custom_components.vidaa.protocol import (
+    CLIENT_ID_PATTERN,
+    XOR_TIMESTAMP_MASK,
+    clean_mac,
+    extract_pkcs12_to_pem,
+    generate_initial_credentials,
+    normalize_mac_address,
+    resolve_ca_certificate,
+    resolve_certificates,
+)
+
+
+def test_clean_mac():
+    """Test normalizing MAC separators (the caller's case is preserved)."""
+    assert clean_mac("e8:51:77:aa:bb:cc") == "e8:51:77:aa:bb:cc"
+    assert clean_mac("e8-51-77-aa-bb-cc") == "e8:51:77:aa:bb:cc"
+    assert clean_mac("e85177aabbcc") == "e8:51:77:aa:bb:cc"
+    assert normalize_mac_address("e8:51:77:aa:bb:cc") == "e8:51:77:aa:bb:cc"
+
+    # Random MAC generation on None or invalid
+    rnd = clean_mac(None)
+    assert len(rnd) == 17
+    assert len(rnd.split(":")) == 6
+    rnd_norm = normalize_mac_address(None)
+    assert len(rnd_norm) == 17
+    assert len(rnd_norm.split(":")) == 6
+
+
+def test_clean_mac_preserves_case():
+    """clean_mac must round-trip the caller's MAC case unchanged.
+
+    The MAC case feeds the case-sensitive ``race`` hash and the ``<mac>$his$…``
+    client_id; uppercasing it diverges from the reference implementations.
+    """
+    assert clean_mac("e8:51:77:aa:bb:cc") == "e8:51:77:aa:bb:cc"
+    assert clean_mac("E8:51:77:AA:BB:CC") == "E8:51:77:AA:BB:CC"
+    assert clean_mac("e8-51-77-AA-BB-cc") == "e8:51:77:AA:BB:cc"
+    assert clean_mac("e85177AABBcc") == "e8:51:77:AA:BB:cc"
+
+
+def test_generate_initial_credentials_preserves_mac_case_in_client_id():
+    """The generated client_id must embed the caller's MAC case (not upper-cased)."""
+    mac = "9f:b3:a4:e0:4a:d7"
+    ts = 1788778246
+    client_id, _username, _password = generate_initial_credentials(mac=mac, timestamp=ts, auth_profile="modern")
+    expected_md5 = hashlib.md5(f"{CLIENT_ID_PATTERN}${mac}".encode()).hexdigest().upper()
+    assert client_id == f"{mac}$his${expected_md5[:6]}_vidaacommon_001"
+
+
+def test_generate_initial_credentials_standard():
+    """Test credential generation for standard RemoteNOW profile."""
+    mac = "E8:51:77:AA:BB:CC"
+    ts = 1788778246
+
+    client_id, username, password = generate_initial_credentials(mac=mac, timestamp=ts, auth_profile="remotenow")
+
+    # Validate Client ID format: <MAC>$his$<6-char MD5>_vidaacommon_001
+    expected_md5 = hashlib.md5(f"{CLIENT_ID_PATTERN}${mac}".encode()).hexdigest().upper()
+    assert client_id == f"{mac}$his${expected_md5[:6]}_vidaacommon_001"
+
+    # Standard username uses plain timestamp
+    assert username == f"his${ts}"
+
+    # Verify password hash format
+    assert len(password) == 32
+    assert password.isupper()
+
+
+def test_generate_initial_credentials_middle():
+    """Test credential generation for Middle VIDAA (3000-3285) with XOR mask + Standard salt."""
+    mac = "E8:51:77:AA:BB:CC"
+    ts = 1788778246
+
+    client_id, username, password = generate_initial_credentials(mac=mac, timestamp=ts, auth_profile="middle")
+
+    expected_md5 = hashlib.md5(f"{CLIENT_ID_PATTERN}${mac}".encode()).hexdigest().upper()
+    assert client_id == f"{mac}$his${expected_md5[:6]}_vidaacommon_001"
+
+    # Middle username uses XOR masked timestamp
+    expected_xor = ts ^ XOR_TIMESTAMP_MASK
+    assert username == f"his${expected_xor}"
+    assert len(password) == 32
+
+
+def test_generate_initial_credentials_legacy():
+    """Test static credential generation for legacy pre-dynamic firmware."""
+    mac = "E8:51:77:AA:BB:CC"
+    client_id, username, password = generate_initial_credentials(mac=mac, auth_profile="legacy")
+
+    assert username == "hisenseservice"
+    assert password == "multimqttservice"
+    assert "vidaacommon_001" in client_id
+
+
+def test_generate_initial_credentials_modern():
+    """Test credential generation for Modern VIDAA 2.0 with XOR timestamp mask."""
+    mac = "E8:51:77:AA:BB:CC"
+    ts = 1788778246
+
+    client_id, username, password = generate_initial_credentials(mac=mac, timestamp=ts, auth_profile="modern")
+
+    expected_md5 = hashlib.md5(f"{CLIENT_ID_PATTERN}${mac}".encode()).hexdigest().upper()
+    assert client_id == f"{mac}$his${expected_md5[:6]}_vidaacommon_001"
+
+    # Modern username uses XOR masked timestamp
+    expected_xor = ts ^ XOR_TIMESTAMP_MASK
+    assert username == f"his${expected_xor}"
+    assert len(password) == 32
+
+
+def test_resolve_certificates(tmp_path):
+    """Test resolving certificates across directory hierarchies."""
+    cert_dir = tmp_path / "certs"
+    cert_dir.mkdir()
+
+    cert_file = cert_dir / "vidaa_2024_cert.pem"
+    key_file = cert_dir / "vidaa_2024_key.pem"
+    cert_file.write_text("CERT DATA")
+    key_file.write_text("KEY DATA")
+
+    cert, key = resolve_certificates(auth_profile="modern", search_dirs=[str(cert_dir)])
+    assert cert == str(cert_file)
+    assert key == str(key_file)
+
+
+def test_resolve_certificates_versioned(tmp_path):
+    """Test resolving versioned certificates such as vidaa_client_v01.pem / key."""
+    cert_dir = tmp_path / "ssl"
+    cert_dir.mkdir()
+
+    v01_cert = cert_dir / "vidaa_client_v01.pem"
+    v01_key = cert_dir / "vidaa_client_v01.key"
+    v01_cert.write_text("V01 CERT")
+    v01_key.write_text("V01 KEY")
+
+    cert, key = resolve_certificates(auth_profile="auto", search_dirs=[str(cert_dir)])
+    assert cert == str(v01_cert)
+    assert key == str(v01_key)
+
+    # Test auto matching key alongside explicit certfile
+    cert_match, key_match = resolve_certificates(certfile=str(v01_cert), search_dirs=[str(cert_dir)])
+    assert cert_match == str(v01_cert)
+    assert key_match == str(v01_key)
+
+
+def test_extract_pkcs12_and_resolve(tmp_path):
+    """Test generating a PKCS#12 bundle, extracting to PEM, and auto-resolving."""
+    # Generate synthetic key and cert
+    key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    subject = issuer = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "TestCert")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    p12_bytes = pkcs12.serialize_key_and_certificates(
+        b"TestCert",
+        key,
+        cert,
+        None,
+        serialization.BestAvailableEncryption(b"186e990688070325a1c4b0ce275d2388"),
+    )
+
+    p12_file = tmp_path / "client_mobile_android.p12"
+    p12_file.write_bytes(p12_bytes)
+
+    # Test extract_pkcs12_to_pem directly
+    extracted = extract_pkcs12_to_pem(str(p12_file), dest_dir=str(tmp_path))
+    from pathlib import Path
+
+    assert extracted is not None
+    assert Path(extracted[1]).stat().st_mode & 0o077 == 0
+    assert extracted is not None
+    cert_path, key_path = extracted
+    assert os.path.isfile(cert_path)
+    assert os.path.isfile(key_path)
+
+    # Test resolve_certificates finding the .p12 archive
+    resolved_cert, resolved_key = resolve_certificates(auth_profile="modern", search_dirs=[str(tmp_path)])
+    assert os.path.isfile(resolved_cert)
+    assert os.path.isfile(resolved_key)
+
+
+def test_resolve_ca_certificate(tmp_path):
+    """Test resolving optional CA certificate for server verification."""
+    ca_dir = tmp_path / "ca_certs"
+    ca_dir.mkdir()
+
+    ca_file = ca_dir / "remote_ca.pem"
+    ca_file.write_text("CA CERT DATA")
+
+    # Found in search dirs
+    found_ca = resolve_ca_certificate(search_dirs=[str(ca_dir)])
+    assert found_ca == str(ca_file)
+
+    # Explicit ca_path
+    assert resolve_ca_certificate(ca_path=str(ca_file)) == str(ca_file)
+    assert resolve_ca_certificate(ca_path="/nonexistent/path.pem") is None
+
+
+def test_extract_el_pkcs12_and_resolve(tmp_path):
+    """Test discovering and extracting El.p12 from VIDAA APK."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    subject = issuer = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "VidaaAppAndroidV01")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    p12_bytes = pkcs12.serialize_key_and_certificates(
+        b"VidaaAppAndroidV01",
+        key,
+        cert,
+        None,
+        serialization.BestAvailableEncryption(b"186e990688070325a1c4b0ce275d2388"),
+    )
+
+    el_file = tmp_path / "El.p12"
+    el_file.write_bytes(p12_bytes)
+
+    resolved_cert, resolved_key = resolve_certificates(auth_profile="auto", search_dirs=[str(tmp_path)])
+    assert os.path.isfile(resolved_cert)
+    assert os.path.isfile(resolved_key)
+    assert "El_cert.pem" in resolved_cert
+    assert "El_key.pem" in resolved_key
+
+
+def test_resolve_certificates_direct_p12_argument(tmp_path):
+    """Test passing a direct .p12 certfile path to resolve_certificates."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    subject = issuer = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "DirectP12")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    p12_bytes = pkcs12.serialize_key_and_certificates(
+        b"DirectP12",
+        key,
+        cert,
+        None,
+        serialization.BestAvailableEncryption(b"186e990688070325a1c4b0ce275d2388"),
+    )
+
+    custom_p12 = tmp_path / "custom_bundle.p12"
+    custom_p12.write_bytes(p12_bytes)
+
+    resolved_cert, resolved_key = resolve_certificates(certfile=str(custom_p12))
+    assert os.path.isfile(resolved_cert)
+    assert os.path.isfile(resolved_key)
+    assert "custom_bundle_cert.pem" in resolved_cert
+    assert "custom_bundle_key.pem" in resolved_key
+
+
+def test_resolve_certificates_failed_p12_returns_none(tmp_path):
+    """Test that a corrupt or unextractable .p12 archive returns (None, None) instead of falling back to raw path."""
+    bad_p12 = tmp_path / "corrupt.p12"
+    bad_p12.write_bytes(b"not a valid pkcs12 bundle")
+
+    resolved_cert, resolved_key = resolve_certificates(certfile=str(bad_p12))
+    assert resolved_cert is None
+    assert resolved_key is None
+
+
+def test_profile_cert_candidates_el_p12_membership():
+    """Verify El.p12 and el.p12 exist in candidate lists for appropriate profiles."""
+    from custom_components.vidaa.protocol.certs import PROFILE_CERT_CANDIDATES
+
+    for profile in ("modern", "middle", "auto"):
+        _, _, p12_names = PROFILE_CERT_CANDIDATES[profile]
+        assert "El.p12" in p12_names
+        assert "el.p12" in p12_names
+
+
+def test_get_profile_default_cert_paths(tmp_path):
+    """Test get_profile_default_cert_paths for different auth profiles."""
+    from custom_components.vidaa.protocol import get_profile_default_cert_paths
+
+    _cert, _key, cert_dir, cert_name, key_name = get_profile_default_cert_paths("modern", config_dir=str(tmp_path))
+    assert cert_name == "vidaa_2024_cert.pem"
+    assert key_name == "vidaa_2024_key.pem"
+    assert cert_dir == str(tmp_path / "ssl")
+
+    _cert2, _key2, _dir2, cert_name2, key_name2 = get_profile_default_cert_paths("remotenow", config_dir=str(tmp_path))
+    assert cert_name2 == "remotenow_2018_cert.pem"
+    assert key_name2 == "remotenow_2018_key.pem"
+
+
+def test_generate_initial_credentials_oem_brands():
+    """Test generating initial dynamic credentials for OEM VIDAA brands."""
+    from custom_components.vidaa.protocol import generate_initial_credentials
+
+    # Toshiba brand
+    client_id, username, password = generate_initial_credentials(
+        mac="aa:bb:cc:dd:ee:ff",
+        timestamp=1700000000,
+        auth_profile="modern",
+        brand="tos",
+    )
+    assert "aa:bb:cc:dd:ee:ff$tos$" in client_id
+    assert username.startswith("tos$")
+    assert len(password) == 32
+
+    # Loewe brand
+    client_id, username, password = generate_initial_credentials(
+        mac="aa:bb:cc:dd:ee:ff",
+        timestamp=1700000000,
+        auth_profile="auto",
+        brand="loe",
+    )
+    assert "aa:bb:cc:dd:ee:ff$loe$" in client_id
+    assert username.startswith("loe$")
+
+
+def test_validate_ssl_certs(tmp_path):
+    """Test validate_ssl_certs with missing, invalid, and empty inputs."""
+    from custom_components.vidaa.protocol import validate_ssl_certs
+
+    # None inputs
+    assert validate_ssl_certs(None, None) == (True, None)
+
+    # Missing files
+    valid, err = validate_ssl_certs("/nonexistent/cert.pem", "/nonexistent/key.pem")
+    assert valid is False
+    assert err == "certs_not_found"
+
+    # Corrupted / non-PEM files
+    cert_file = tmp_path / "bad_cert.pem"
+    key_file = tmp_path / "bad_key.pem"
+    cert_file.write_text("NOT A VALID CERTIFICATE", encoding="utf-8")
+    key_file.write_text("NOT A VALID KEY", encoding="utf-8")
+
+    valid, err = validate_ssl_certs(str(cert_file), str(key_file))
+    assert valid is False
+    assert err is not None and "invalid_ssl_cert" in err
+
+
+def test_extract_pkcs12_cached_on_second_call(tmp_path):
+    """Test that extract_pkcs12_to_pem reuses cached PEMs without re-reading or rewriting."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    subject = issuer = x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, "CachedP12")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(UTC) - timedelta(days=1))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    p12_bytes = pkcs12.serialize_key_and_certificates(
+        b"CachedP12",
+        key,
+        cert,
+        None,
+        serialization.BestAvailableEncryption(b"186e990688070325a1c4b0ce275d2388"),
+    )
+
+    p12_file = tmp_path / "cached.p12"
+    p12_file.write_bytes(p12_bytes)
+
+    # First call extracts PEMs
+    first = extract_pkcs12_to_pem(str(p12_file), dest_dir=str(tmp_path))
+    assert first is not None
+    cert_path, key_path = first
+    initial_mtime = os.path.getmtime(cert_path)
+
+    # Second call uses cache immediately
+    second = extract_pkcs12_to_pem(str(p12_file), dest_dir=str(tmp_path))
+    assert second == (cert_path, key_path)
+    assert os.path.getmtime(cert_path) == initial_mtime
+
+
+def test_client_skips_cert_resolution_when_unneeded():
+    """Test VidaaClient skips disk cert resolution when SSL is disabled or certs are pre-resolved."""
+    from unittest.mock import patch
+
+    from custom_components.vidaa.client import VidaaClient
+
+    with patch("custom_components.vidaa.client.resolve_certificates") as mock_resolve:
+        # Non-SSL client skips resolve_certificates
+        client1 = VidaaClient("192.168.1.50", use_ssl=False)
+        assert client1.use_ssl is False
+        mock_resolve.assert_not_called()
+
+        # Legacy auth profile skips resolve_certificates
+        client2 = VidaaClient("192.168.1.50", auth_profile="legacy")
+        assert client2.auth_profile == "legacy"
+        mock_resolve.assert_not_called()
+
+        # Pre-resolved PEM paths skip resolve_certificates
+        client3 = VidaaClient(
+            "192.168.1.50",
+            use_ssl=True,
+            certfile="/path/to/cert.pem",
+            keyfile="/path/to/key.pem",
+        )
+        mock_resolve.assert_not_called()
+        assert client3.certfile == "/path/to/cert.pem"
+        assert client3.keyfile == "/path/to/key.pem"
+
+
+def test_generate_initial_credentials_unique_per_tv_mac():
+    """Verify distinct TV hardware MACs generate unique MQTT client IDs and topic paths to prevent broker collisions."""
+    from custom_components.vidaa.protocol.crypto import generate_initial_credentials
+    from custom_components.vidaa.protocol.topics import build_topic_paths
+
+    client_id_1, _, _ = generate_initial_credentials(mac="E8:51:77:AA:BB:CC", brand="his")
+    client_id_2, _, _ = generate_initial_credentials(mac="E4:3B:C9:AA:BB:CC", brand="his")
+    client_id_toshiba, _, _ = generate_initial_credentials(mac="E8:51:77:AA:BB:CC", brand="toshiba")
+
+    # Different MACs produce distinct client IDs
+    assert client_id_1 != client_id_2
+    assert "E8:51:77:AA:BB:CC" in client_id_1
+    assert "E4:3B:C9:AA:BB:CC" in client_id_2
+
+    # Different OEM brands produce distinct client IDs
+    assert client_id_1 != client_id_toshiba
+    assert "$his$" in client_id_1
+    assert "$toshiba$" in client_id_toshiba
+
+    # Unicast topic paths for mobile pushes are fully isolated
+    topics_1 = build_topic_paths(client_id_1)
+    topics_2 = build_topic_paths(client_id_2)
+    assert topics_1.mobile != topics_2.mobile
+    assert topics_1.mobile == f"/remoteapp/mobile/{client_id_1}/"
+    assert topics_2.mobile == f"/remoteapp/mobile/{client_id_2}/"
+
+
+def test_pairing_identity_is_separate_from_tv_mac():
+    """Independent HA installations must not use the television's own identity."""
+    from custom_components.vidaa.client import VidaaClient
+
+    mac = "02:00:00:00:00:01"
+    first = VidaaClient("192.0.2.10", mac=mac)
+    second = VidaaClient("192.0.2.10", mac=mac)
+    first.derive_pairing_credentials(timestamp=1700000000)
+    second.derive_pairing_credentials(timestamp=1700000000)
+    assert first.client_id != second.client_id
+    assert first.mac == mac
+    client_id = first.client_id
+    first.derive_pairing_credentials(timestamp=1700000001)
+    assert first.client_id == client_id

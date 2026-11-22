@@ -1,0 +1,124 @@
+"""Auto-discovery flow mixin for VIDAA Smart TV (SSDP & Zeroconf)."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from homeassistant import config_entries
+from homeassistant.data_entry_flow import AbortFlow
+from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
+
+from ..const import CONF_IP_ADDRESS, CONF_MAC_ADDRESS, DOMAIN
+from ..protocol import DiscoveredTvInfo, parse_ssdp_discovery, parse_zeroconf_discovery
+from .helpers import async_resolve_mac
+
+if TYPE_CHECKING:
+    from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
+
+    from ..config_flow import VidaaConfigFlow
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class DiscoveryFlowMixin:
+    """Mixin for SSDP and Zeroconf device discovery steps."""
+
+    async def _async_handle_discovery(
+        self: VidaaConfigFlow, parsed: DiscoveredTvInfo | None
+    ) -> config_entries.ConfigFlowResult:
+        """Handle common SSDP and Zeroconf device resolution and flow routing."""
+        if not parsed or not parsed.host:
+            return self.async_abort(reason="not_vidaa_tv" if parsed is None else "cannot_connect")
+
+        self.ip_address = parsed.host
+        self.discovered_title = parsed.title
+        self.manufacturer = getattr(parsed, "manufacturer", None)
+        self.model = getattr(parsed, "model", None)
+        self.brand = getattr(parsed, "brand", "his") or "his"
+        self.mac_address = parsed.mac_address
+        self.secondary_mac_address = getattr(parsed, "secondary_mac_address", None)
+        if not self.mac_address and parsed.host:
+            self.mac_address = await async_resolve_mac(self.hass, parsed.host)
+
+        unique_id = self.mac_address or parsed.unique_id
+        if unique_id:
+            await self.async_set_unique_id(unique_id)
+            self._abort_if_unique_id_configured(updates={CONF_IP_ADDRESS: self.ip_address})
+
+        if hasattr(self, "_async_current_entries"):
+            for existing in self._async_current_entries():
+                if getattr(existing, "data", {}).get(CONF_IP_ADDRESS) == self.ip_address:
+                    return self.async_abort(reason="already_configured")
+
+        return await self.async_step_discovery_confirm()
+
+    async def async_step_dhcp(
+        self: VidaaConfigFlow, discovery_info: DhcpServiceInfo
+    ) -> config_entries.ConfigFlowResult:
+        """Follow DHCP address changes for an already configured primary MAC."""
+        mac = format_mac(discovery_info.macaddress)
+        ip = str(discovery_info.ip)
+        entries = self.hass.config_entries.async_entries(DOMAIN)
+        for entry in entries:
+            configured_mac = entry.data.get(CONF_MAC_ADDRESS)
+            if entry.disabled_by is not None or not configured_mac or format_mac(configured_mac) != mac:
+                continue
+            if entry.data.get(CONF_IP_ADDRESS) == ip:
+                return self.async_abort(reason="already_configured")
+            if any(other is not entry and other.data.get(CONF_IP_ADDRESS) == ip for other in entries):
+                return self.async_abort(reason="already_configured")
+            if self.hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_IP_ADDRESS: ip}
+            ) and entry.state in (config_entries.ConfigEntryState.LOADED, config_entries.ConfigEntryState.SETUP_RETRY):
+                self.hass.config_entries.async_schedule_reload(entry.entry_id)
+            return self.async_abort(reason="already_configured")
+        return self.async_abort(reason="not_vidaa_tv")
+
+    async def async_step_ssdp(
+        self: VidaaConfigFlow, discovery_info: SsdpServiceInfo
+    ) -> config_entries.ConfigFlowResult:
+        """Handle SSDP discovery."""
+        parsed = await self.hass.async_add_executor_job(parse_ssdp_discovery, discovery_info)
+        return await self._async_handle_discovery(parsed)
+
+    async def async_step_zeroconf(
+        self: VidaaConfigFlow, discovery_info: ZeroconfServiceInfo
+    ) -> config_entries.ConfigFlowResult:
+        """Handle Zeroconf / mDNS discovery."""
+        parsed = await self.hass.async_add_executor_job(parse_zeroconf_discovery, discovery_info)
+        return await self._async_handle_discovery(parsed)
+
+    async def async_step_discovery_confirm(
+        self: VidaaConfigFlow, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Confirm discovery setup with user."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if await self._async_resolve_ssl_certs():
+                try:
+                    return await self._async_init_client_and_auth()
+                except AbortFlow:
+                    # HA flow control (e.g. already_configured) must never be
+                    # turned into cannot_connect.
+                    raise
+                except Exception as e:
+                    _LOGGER.warning(
+                        "[%s] Failed to connect or initiate auth with TV: %s",
+                        self.ip_address,
+                        e,
+                    )
+                    errors["base"] = "cannot_connect"
+            else:
+                return await self.async_step_certs()
+
+        return self.async_show_form(
+            step_id="discovery_confirm",
+            description_placeholders={
+                "name": self.discovered_title or self.ip_address or "VIDAA TV",
+                "ip_address": self.ip_address or "",
+            },
+            errors=errors,
+        )

@@ -1,0 +1,72 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.venv/
+
+# Private Keys, Certificates, and Local Pairing Credentials
+certs/
+*.pem
+*.key
+*.cer
+*.crt
+*.pkcs8
+*.p12
+*.pfx
+*.bks
+*.jks
+credentials.json
+
+# Backups & Temp files
+*.bak*
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Virtual Environments
+.venv/
+env/
+venv/
+ENV/
+
+# AI Assistant files
+GEMINI.md
+AGENTS.md
+CLAUDE.md
+.cursorrules
+.copilot*
+
+# Local deployment & developer scripts
+scripts/sync_vodka.sh
+scripts/verify.sh
+scripts/*.local.*
+*.local.*
+scratch/

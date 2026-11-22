@@ -1,0 +1,402 @@
+"""Unit tests for VidaaUpnpClient and UPnP LAN Control services."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from custom_components.vidaa.client import VidaaClient
+from custom_components.vidaa.protocol.upnp import (
+    PATH_LAN_CONTROL,
+    HisenseUpnpClient,
+    VidaaUpnpClient,
+)
+
+SAMPLE_DEVICE_DESC = """<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+    <device>
+        <friendlyName>Hisense TV</friendlyName>
+        <modelName>Renderer</modelName>
+    </device>
+</root>
+"""
+
+SAMPLE_GET_VOLUME_RESP = """<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+ <s:Body>
+  <u:GetVolumeResponse xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+   <CurrentVolume>25</CurrentVolume>
+  </u:GetVolumeResponse>
+ </s:Body>
+</s:Envelope>
+"""
+
+SAMPLE_GET_MUTE_RESP = """<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+ <s:Body>
+  <u:GetMuteResponse xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+   <CurrentMute>1</CurrentMute>
+  </u:GetMuteResponse>
+ </s:Body>
+</s:Envelope>
+"""
+
+SAMPLE_GET_TRANSPORT_RESP = """<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+ <s:Body>
+  <u:GetTransportInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+   <CurrentTransportState>PLAYING</CurrentTransportState>
+   <CurrentTransportStatus>OK</CurrentTransportStatus>
+   <CurrentSpeed>1</CurrentSpeed>
+  </u:GetTransportInfoResponse>
+ </s:Body>
+</s:Envelope>
+"""
+
+
+@pytest.fixture
+def mock_session():
+    """Returns an aiohttp-compatible mock session."""
+    session = MagicMock()
+    session.closed = False
+    return session
+
+
+@pytest.mark.anyio
+async def test_upnp_probe_success(mock_session):
+    """Test successful UPnP probe discovering friendly name and model."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.read = AsyncMock(return_value=SAMPLE_DEVICE_DESC.encode("utf-8"))
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.get.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    result = await client.async_probe()
+
+    assert result is not None
+    assert result["is_alive"] is True
+    assert result["port"] == 38400
+    assert result["friendly_name"] == "Hisense TV"
+    assert result["model_name"] == "Renderer"
+
+
+@pytest.mark.anyio
+async def test_upnp_probe_failure(mock_session):
+    """Test UPnP probe when endpoints time out."""
+    cm = AsyncMock()
+    cm.__aenter__.side_effect = Exception("Connection refused")
+    mock_session.get.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    result = await client.async_probe()
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_upnp_get_volume(mock_session):
+    """Test retrieving volume via RenderingControl."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value=SAMPLE_GET_VOLUME_RESP)
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.post.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    vol = await client.async_get_volume()
+
+    assert vol == 25
+    mock_session.post.assert_called_once()
+    args, kwargs = mock_session.post.call_args
+    assert "/upnp/control/mingusrcr" in args[0]
+    assert "RenderingControl:1#GetVolume" in kwargs["headers"]["SOAPAction"]
+
+
+@pytest.mark.anyio
+async def test_upnp_set_volume(mock_session):
+    """Test setting volume via RenderingControl with clamping."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value="")
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.post.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    success = await client.async_set_volume(150)  # Clamps to 100
+
+    assert success is True
+    _args, kwargs = mock_session.post.call_args
+    assert "<DesiredVolume>100</DesiredVolume>" in kwargs["data"].decode("utf-8")
+
+
+@pytest.mark.anyio
+async def test_upnp_get_mute(mock_session):
+    """Test retrieving mute status."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value=SAMPLE_GET_MUTE_RESP)
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.post.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    muted = await client.async_get_mute()
+
+    assert muted is True
+
+
+@pytest.mark.anyio
+async def test_upnp_set_mute(mock_session):
+    """Test setting mute state."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value="")
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.post.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    success = await client.async_set_mute(False)
+
+    assert success is True
+    _args, kwargs = mock_session.post.call_args
+    assert "<DesiredMute>0</DesiredMute>" in kwargs["data"].decode("utf-8")
+
+
+@pytest.mark.anyio
+async def test_upnp_get_transport_info(mock_session):
+    """Test retrieving media playback state."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value=SAMPLE_GET_TRANSPORT_RESP)
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.post.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    info = await client.async_get_transport_info()
+
+    assert info is not None
+    assert info["state"] == "PLAYING"
+    assert info["status"] == "OK"
+    assert info["speed"] == "1"
+
+
+@pytest.mark.anyio
+async def test_upnp_send_lan_control(mock_session):
+    """Test sending proprietary LanControlInfo action."""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value="<Result>OK</Result>")
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.post.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    status, text = await client.async_send_lan_control("RemoteKey", "SendKey", "KEY_HOME")
+
+    assert status == 200
+    assert text == "<Result>OK</Result>"
+    args, kwargs = mock_session.post.call_args
+    assert PATH_LAN_CONTROL in args[0]
+    assert "<OpClass>RemoteKey</OpClass>" in kwargs["data"].decode("utf-8")
+
+
+@pytest.mark.anyio
+async def test_client_upnp_wrappers():
+    """Test that VidaaClient UPnP methods properly delegate to VidaaUpnpClient."""
+    tv_client = VidaaClient("192.168.1.50")
+
+    with (
+        patch.object(tv_client.upnp, "async_get_volume", AsyncMock(return_value=42)) as mock_vol,
+        patch.object(tv_client.upnp, "async_set_volume", AsyncMock(return_value=True)) as mock_set_vol,
+        patch.object(tv_client.upnp, "async_get_mute", AsyncMock(return_value=False)) as mock_mute,
+        patch.object(tv_client.upnp, "async_set_mute", AsyncMock(return_value=True)) as mock_set_mute,
+        patch.object(
+            tv_client.upnp,
+            "async_get_transport_info",
+            AsyncMock(return_value={"state": "PAUSED_PLAYBACK", "status": "OK", "speed": "1"}),
+        ) as mock_trans,
+        patch.object(
+            tv_client.upnp,
+            "async_probe",
+            AsyncMock(return_value={"is_alive": True, "port": 38400, "friendly_name": "Living Room TV"}),
+        ) as mock_probe,
+    ):
+        assert await tv_client.async_upnp_get_volume() == 42
+        mock_vol.assert_called_once()
+
+        assert await tv_client.async_upnp_set_volume(42) is True
+        mock_set_vol.assert_called_once_with(42)
+
+        assert await tv_client.async_upnp_get_mute() is False
+        mock_mute.assert_called_once()
+
+        assert await tv_client.async_upnp_set_mute(True) is True
+        mock_set_mute.assert_called_once_with(True)
+
+        trans = await tv_client.async_upnp_get_transport_info()
+        assert trans["state"] == "PAUSED_PLAYBACK"
+        mock_trans.assert_called_once()
+
+        probe = await tv_client.async_upnp_probe()
+        assert probe["friendly_name"] == "Living Room TV"
+        mock_probe.assert_called_once()
+
+
+def test_upnp_desc_parsers() -> None:
+    """Test dedicated UPnP descriptor parsing utilities."""
+    from custom_components.vidaa.tv.upnp_desc import (
+        parse_upnp_description_properties,
+        parse_upnp_friendly_name,
+        parse_upnp_renderer_descriptor,
+    )
+
+    xml_sample = """<?xml version="1.0"?>
+    <root xmlns="urn:schemas-upnp-org:device-1-0">
+        <device>
+            <friendlyName>Lounge Hisense TV</friendlyName>
+            <modelName>VIDAA UHD</modelName>
+            <modelNumber>65U7H</modelNumber>
+            <manufacturer>Hisense</manufacturer>
+            <modelDescription>
+                macWifi=aa:bb:cc:dd:ee:01
+                macEthernet=aa:bb:cc:dd:ee:02
+                brand=Hisense
+                platform=MTK9602
+                vidaa_support=1
+                voice=remote
+                transport_protocol=mqtt
+            </modelDescription>
+        </device>
+    </root>
+    """
+
+    assert parse_upnp_friendly_name(xml_sample) == "Lounge Hisense TV"
+    assert parse_upnp_friendly_name("<invalid>xml") is None
+
+    props = parse_upnp_description_properties("brand=Hisense\nplatform=MTK9602\nkey_without_val")
+    assert props == {"brand": "Hisense", "platform": "MTK9602"}
+
+    desc = parse_upnp_renderer_descriptor(xml_sample)
+    assert desc["friendly_name"] == "Lounge Hisense TV"
+    assert desc["model_name"] == "VIDAA UHD"
+    assert desc["model_number"] == "65U7H"
+    assert desc["manufacturer"] == "Hisense"
+    assert desc["mac_wifi"] == "aa:bb:cc:dd:ee:01"
+    assert desc["mac_ethernet"] == "aa:bb:cc:dd:ee:02"
+    assert desc["brand"] == "Hisense"
+    assert desc["platform"] == "MTK9602"
+    assert desc["vidaa_support"] == "1"
+    assert desc["voice"] == "remote"
+    assert desc["transport_protocol"] == "mqtt"
+
+    empty_desc = parse_upnp_renderer_descriptor("not valid xml")
+    assert empty_desc["friendly_name"] is None
+
+
+@pytest.mark.anyio
+async def test_upnp_injected_session_retention():
+    """Verify that injecting an external aiohttp.ClientSession does not close it on client close."""
+    external_session = MagicMock()
+    external_session.closed = False
+    external_session.close = AsyncMock()
+
+    client = VidaaUpnpClient("192.168.1.100", session=external_session)
+    assert client._session is external_session
+    assert client._owns_session is False
+
+    await client.close()
+    external_session.close.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_upnp_owned_session_closed():
+    """Verify that when no session is injected, the internally created session is closed."""
+    client = VidaaUpnpClient("192.168.1.100", session=None)
+    mock_internal_session = MagicMock()
+    mock_internal_session.closed = False
+    mock_internal_session.close = AsyncMock()
+    client._session = mock_internal_session
+    client._owns_session = True
+
+    await client.close()
+    mock_internal_session.close.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_upnp_get_device_fingerprint_with_model_description(mock_session):
+    """Verify that async_get_device_fingerprint parses key=value pairs from modelDescription."""
+    desc_xml = """<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+    <device>
+        <friendlyName>Toshiba TV</friendlyName>
+        <modelName>Renderer</modelName>
+        <modelNumber>55C350</modelNumber>
+        <manufacturer>SmartTV</manufacturer>
+        <modelDescription>vidaa_support=1
+brand=tos
+platform=MTK9602
+transport_protocol=3290
+macWifi=e85177aabbcc
+macEthernet=001122334455</modelDescription>
+    </device>
+</root>
+"""
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.read = AsyncMock(return_value=desc_xml.encode("utf-8"))
+
+    cm = AsyncMock()
+    cm.__aenter__.return_value = mock_resp
+    mock_session.get.return_value = cm
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    info = await client.async_get_device_fingerprint()
+
+    assert info["friendly_name"] == "Toshiba TV"
+    assert info["model_name"] == "Renderer"
+    assert info["model_number"] == "55C350"
+    assert info["manufacturer"] == "SmartTV"
+    assert info["brand"] == "tos"
+    assert info["vidaa_support"] == "1"
+    assert info["platform"] == "MTK9602"
+    assert info["transport_protocol"] == "3290"
+    assert info["mac_wifi"] == "e85177aabbcc"
+    assert info["mac_ethernet"] == "001122334455"
+
+
+def test_upnp_client_alias() -> None:
+    """Verify VidaaUpnpClient and HisenseUpnpClient aliases match."""
+    assert HisenseUpnpClient is VidaaUpnpClient
+    assert VidaaClient is VidaaClient
+
+
+@pytest.mark.anyio
+async def test_renderer_read_falls_back_to_modern_port(mock_session):
+    """A cold read can reach a renderer that only listens on 18400."""
+    unreachable = AsyncMock()
+    unreachable.__aenter__.side_effect = TimeoutError
+    response = MagicMock(status=200)
+    response.text = AsyncMock(return_value=SAMPLE_GET_MUTE_RESP)
+    available = AsyncMock()
+    available.__aenter__.return_value = response
+    mock_session.post.side_effect = [unreachable, available, available]
+
+    client = VidaaUpnpClient("192.168.1.100", session=mock_session)
+    assert await client.async_get_mute() is True
+    assert await client.async_get_mute() is True
+    ports = [call.args[0].split(":")[2].split("/")[0] for call in mock_session.post.call_args_list]
+    assert ports == ["38400", "18400", "18400"]
