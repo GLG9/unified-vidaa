@@ -126,3 +126,9 @@ The standalone V4n1X-style volume, TV state and firmware/hardware sensors
 are also provided. They read the existing MQTT client's cache rather than
 opening a second session. Firmware or platform remains unknown until the
 TV supplies it.
+
+Standby and wake through Home Assistant were confirmed. The broker port
+stayed available during standby, so a separate deep-standby Wake-on-LAN
+test remains open. The firmware sensor reported `V0000.09.62M`, with the
+model string and manufacturer reported by the TV. The hardware platform
+is included only if the TV reports it.

@@ -24,3 +24,9 @@ entry `the TV` loaded and registered
 `media_player.example_tv` and `remote.example_tv`. The existing
 `media_player.example_dlna` belongs to the old native DLNA entry and remains
 in place. It does not open a competing MQTT connection.
+
+The final restart used the saved pairing. One VIDAA device was online,
+with separate volume, TV-state, firmware/hardware, app and source
+sensors. The two additional diagnostic sensors for the reported name
+and clock drift were enabled through the entity registry. The native
+DLNA and Apple TV integrations and HomeKit pairing remain in place.

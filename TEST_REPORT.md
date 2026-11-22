@@ -32,3 +32,24 @@ mute service changed the TV feedback to muted and back to unmuted.
 HDMI1 reported as Apple TV, YouTube launched and the Home key restored
 the original Home Launcher. The force-reconnect button restored the
 runtime MQTT session.
+
+The final suite reported `388 passed in 156.82s (0:02:36)`. Ruff also
+passed. Following the final Core restart, the saved pairing reconnected
+without another PIN. The additional standalone sensors reported a live
+volume level, TV state and firmware. The TV powered off and woke from
+standby through Home Assistant. The MQTT port stayed open during standby,
+so this exercise did not isolate Wake-on-LAN from the ordinary wake path.
+The TV was restored to HDMI1, its Apple TV input. At the final check the
+TV was again in standby and the MQTT connection was still online.
+
+No VIDAA errors or critical VIDAA records appeared in the final log
+window, and the active repair report had no VIDAA issue. The television
+continued advertising an already-paired HomeKit service (`sf=0`).
+Apple Home itself was not used as a test client.
+
+Automated coverage is distinct from device verification. Token renewal,
+reauthentication, DHCP updates and media command routing have automated
+coverage. A real DHCP lease change, expired-token renewal, switching
+between SDR/HDR10/Dolby Vision, direct channel and keyboard commands,
+media transport in an active Apple TV stream, and legacy hardware
+migration were not exercised in production.
