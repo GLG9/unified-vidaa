@@ -186,3 +186,12 @@ See [features](FEATURE_MATRIX.md), [architecture](ARCHITECTURE.md),
 On the VIDAA device page, **Volume**, **TV state**, **Active source** and
 **Active app** can be used as direct automation inputs. **Firmware and
 hardware** displays the reported version and available hardware attributes.
+
+Additional sensors report the number of installed apps, the number of
+input entries and the current audio output. The firmware/hardware sensor
+also shows the advertised platform, transport protocol and voice codes
+when the TV reports them.
+
+For navigation, call `remote.send_command` with `up`, `down`, `left`,
+`right` or `ok`. These are TV remote keys. Whether the TV forwards them
+to an HDMI source depends on that source and its HDMI-CEC settings.

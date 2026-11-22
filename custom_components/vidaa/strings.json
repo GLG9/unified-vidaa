@@ -157,6 +157,15 @@
   },
   "entity": {
     "sensor": {
+      "app_count": {
+        "name": "Installed app count"
+      },
+      "input_count": {
+        "name": "Input count"
+      },
+      "audio_route": {
+        "name": "Audio output"
+      },
       "volume": {
         "name": "Volume"
       },

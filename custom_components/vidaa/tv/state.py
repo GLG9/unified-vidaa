@@ -168,6 +168,8 @@ def apply_volume_update(client: VidaaClient, data: Any) -> None:
         return
 
     volume_type = data.get("volume_type")
+    if volume_type in (0, "0", 1, "1"):
+        client.volume_route = "ARC / eARC" if int(volume_type) == 1 else "TV Speakers"
     # Volume level updates on master (0), ARC/eARC (1), or unspecified volume broadcasts
     if volume_type in (0, "0", 1, "1", None):
         if "volume_value" in data:
@@ -290,6 +292,7 @@ class TvStateMixin:
         self.state: str = "off"
         self.hotel_mode: bool = False
         self.volume: int = 0
+        self.volume_route: str | None = None
         self.muted: bool = False
         self.sources: list[dict[str, Any]] = []
         self.current_source: str | None = None

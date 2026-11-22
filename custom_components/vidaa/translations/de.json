@@ -135,6 +135,15 @@
   },
   "entity": {
     "sensor": {
+      "app_count": {
+        "name": "Anzahl Apps"
+      },
+      "input_count": {
+        "name": "Anzahl Eingänge"
+      },
+      "audio_route": {
+        "name": "Audioausgabe"
+      },
       "volume": {
         "name": "Lautstärke"
       },

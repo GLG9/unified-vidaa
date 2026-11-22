@@ -1067,3 +1067,6 @@ If this integration has added value to your smart home setup, consider buying me
   absolute volume requests.
 - Bring over standalone V4n1X volume, TV state, and firmware/hardware
   telemetry as sensors on the existing VIDAA device.
+- Point both HACS installation badges to GLG9/unified-vidaa.
+- Add sensors for app count, input count and audio output, plus additional
+  advertised protocol data on the firmware/hardware sensor.

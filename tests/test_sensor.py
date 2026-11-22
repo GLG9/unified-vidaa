@@ -221,7 +221,7 @@ async def test_sensor_setup_entry_excludes_retired_sensors(mock_client, mock_ent
     added_sensors = []
     await async_setup_sensors(hass, mock_entry, lambda entities: added_sensors.extend(entities))
 
-    assert len(added_sensors) == 8
+    assert len(added_sensors) == 11
     unique_ids = [s.unique_id for s in added_sensors]
     by_id = {sensor.unique_id: sensor for sensor in added_sensors}
     mock_client.volume = 37
@@ -229,6 +229,12 @@ async def test_sensor_setup_entry_excludes_retired_sensors(mock_client, mock_ent
     mock_client.firmware_version = "test-version"
     for key, value in (("volume", 37), ("tv_state", "on"), ("firmware", "test-version")):
         assert by_id[f"{mock_entry.entry_id}_{key}"].native_value == value
+    mock_client.apps = [{"name": "YouTube"}]
+    mock_client.sources = [{"sourceid": "HDMI1"}, {"sourceid": "TV"}]
+    mock_client.volume_route = "ARC / eARC"
+    assert by_id[f"{mock_entry.entry_id}_app_count"].native_value == 1
+    assert by_id[f"{mock_entry.entry_id}_input_count"].native_value == 2
+    assert by_id[f"{mock_entry.entry_id}_audio_route"].native_value == "ARC / eARC"
     assert f"{mock_entry.entry_id}_audio_output" not in unique_ids
     assert f"{mock_entry.entry_id}_brand_profile" not in unique_ids
     assert f"{mock_entry.entry_id}_auth_profile" not in unique_ids

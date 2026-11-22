@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -77,6 +78,9 @@ async def async_setup_entry(
             VidaaTelemetrySensor(client, entry, "volume", "volume"),
             VidaaTelemetrySensor(client, entry, "tv_state", "state"),
             VidaaTelemetrySensor(client, entry, "firmware", "firmware_version"),
+            VidaaTelemetrySensor(client, entry, "app_count", "apps"),
+            VidaaTelemetrySensor(client, entry, "input_count", "sources"),
+            VidaaTelemetrySensor(client, entry, "audio_route", "volume_route"),
         ]
     )
 
@@ -87,6 +91,7 @@ class VidaaTelemetrySensor(VidaaBaseSensor):
     def __init__(self, client: VidaaClient, entry: ConfigEntry, key: str, field: str) -> None:
         super().__init__(client, entry)
         self._field = field
+        self._fingerprint: dict[str, str] = {}
         self._attr_translation_key = key
         self._attr_unique_id = f"{self._entry_id}_{key}"
         if key == "volume":
@@ -99,7 +104,10 @@ class VidaaTelemetrySensor(VidaaBaseSensor):
         """Return the most recent value reported by the client."""
         if self._field == "volume" and not (self._client.connected and self._client.is_on):
             return None
-        return getattr(self._client, self._field)
+        value = getattr(self._client, self._field)
+        if self._field in ("apps", "sources"):
+            return len(value) if value else None
+        return value
 
     @property
     def extra_state_attributes(self) -> dict[str, str] | None:
@@ -111,10 +119,21 @@ class VidaaTelemetrySensor(VidaaBaseSensor):
             "manufacturer": self._client.manufacturer or self._manufacturer,
             "platform": self._client.hardware_platform,
             "ip_address": self._client.ip,
+            **self._fingerprint,
         }
         return {name: value for name, value in values.items() if value}
 
     async def async_added_to_hass(self) -> None:
+        if self._field == "firmware_version":
+            with contextlib.suppress(OSError, TimeoutError):
+                fingerprint = await self._client.async_get_device_fingerprint(2.0)
+                self._fingerprint = {
+                    key: fingerprint[key]
+                    for key in ("platform", "transport_protocol", "vidaa_support", "voice")
+                    if fingerprint.get(key) is not None
+                }
+        self._client.register_applist_callback(self._handle_update)
+        self._client.register_sourcelist_callback(self._handle_update)
         self._client.register_volume_callback(self._handle_update)
         self._client.register_state_callback(self._handle_update)
         self._client.register_device_info_callback(self._handle_update)
@@ -122,6 +141,8 @@ class VidaaTelemetrySensor(VidaaBaseSensor):
         self._client.register_disconnected_callback(self._handle_update)
 
     async def async_will_remove_from_hass(self) -> None:
+        self._client.unregister_applist_callback(self._handle_update)
+        self._client.unregister_sourcelist_callback(self._handle_update)
         self._client.unregister_volume_callback(self._handle_update)
         self._client.unregister_state_callback(self._handle_update)
         self._client.unregister_device_info_callback(self._handle_update)
